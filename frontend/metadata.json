@@ -1,0 +1,6 @@
+{
+  "name": "Guardian AI",
+  "description": "Your AI Companion That Grows With You. Guardian AI remembers you across multiple platforms, understands routines, tracks goals, and supports emotional wellbeing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

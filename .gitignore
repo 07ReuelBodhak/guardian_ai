@@ -1,0 +1,54 @@
+# ── IDE & OS Files ─────────────────
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+scratch/
+tmp/
+temp/
+
+# ── General Environment Variables ──
+.env
+.env.*
+!.env.example
+!.env.template
+
+# ── Next.js / React (Frontend) ─────
+frontend/node_modules/
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Prisma (Database) ──────────────
+frontend/prisma/*.db
+frontend/prisma/*.db-journal
+frontend/prisma/dev.db
+frontend/prisma/dev.db-journal
+
+# ── Python (Backend) ───────────────
+backend/__pycache__/
+backend/env/
+backend/venv/
+backend/.venv/
+*.py[cod]
+*$py.class
+backend/chroma_db/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+
+# ── User Requested Exclusions ──────
+test.py
+backend/test.py
+demo.py
+backend/demo.py
+test_parallel.py
+backend/test_parallel.py
+dev.py
+backend/dev.py
