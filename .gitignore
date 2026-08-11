@@ -39,6 +39,7 @@ backend/.venv/
 *.py[cod]
 *$py.class
 backend/chroma_db/
+backend/vector_store/chroma_db/
 backend/.pytest_cache/
 backend/.coverage
 backend/htmlcov/
