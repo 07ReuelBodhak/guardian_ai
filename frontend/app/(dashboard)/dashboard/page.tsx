@@ -1,15 +1,65 @@
-"use client";
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Activity, Brain, CheckCircle2, Clock, ShieldAlert, Sparkles, TrendingUp } from "lucide-react";
+import { Activity, Brain, CheckCircle2, Clock, ShieldAlert, Sparkles, TrendingUp, CalendarX } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { auth } from "@/auth";
+import { PrismaClient } from "@prisma/client";
 
-export default function DashboardOverviewPage() {
+const prisma = new PrismaClient();
+
+export default async function DashboardOverviewPage() {
+  const session = await auth();
+  if (!session?.user?.id) return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id }
+  });
+
+  // Fetch today's tasks
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date();
+  endOfDay.setHours(23, 59, 59, 999);
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      userId: session.user.id,
+      dueDate: {
+        gte: startOfDay,
+        lte: endOfDay
+      }
+    },
+    orderBy: { dueDate: 'asc' }
+  });
+
+  // Fetch latest session log (memory)
+  const latestLog = await prisma.sessionLog.findFirst({
+    where: { userId: session.user.id },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  const formatTime = (date: Date | null) => {
+    if (!date) return "";
+    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric' }).format(date);
+  };
+
+  const getTimeAgo = (date: Date) => {
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    let interval = seconds / 3600;
+    if (interval > 1) {
+      return Math.floor(interval) + " hours ago";
+    }
+    interval = seconds / 60;
+    if (interval > 1) {
+      return Math.floor(interval) + " minutes ago";
+    }
+    return Math.floor(seconds) + " seconds ago";
+  };
+
   return (
     <div className="space-y-6 flex-1 flex flex-col min-h-0">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-1">Welcome back, John</h1>
+        <h1 className="text-2xl font-bold mb-1">Welcome back, {user?.name?.split(" ")[0] || "User"}</h1>
         <p className="text-[#64748B]">Your Guardian is active and protecting your routines.</p>
       </div>
 
@@ -22,7 +72,7 @@ export default function DashboardOverviewPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">Active</div>
-            <p className="text-xs text-[#64748B] mt-1">Monitoring 3 platforms</p>
+            <p className="text-xs text-[#64748B] mt-1">Monitoring channels</p>
           </CardContent>
         </Card>
         
@@ -32,8 +82,10 @@ export default function DashboardOverviewPage() {
             <Activity className="w-4 h-4 text-indigo-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">Focused</div>
-            <p className="text-xs text-[#64748B] mt-1">Based on recent Telegram chats</p>
+            <div className="text-2xl font-bold capitalize">{latestLog ? latestLog.overallMood : "Unknown"}</div>
+            <p className="text-xs text-[#64748B] mt-1">
+              {latestLog ? "Based on recent interactions" : "No recent interactions"}
+            </p>
           </CardContent>
         </Card>
         
@@ -43,19 +95,19 @@ export default function DashboardOverviewPage() {
             <Clock className="w-4 h-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">On Track</div>
-            <p className="text-xs text-[#64748B] mt-1">Next: Study Session in 30m</p>
+            <div className="text-2xl font-bold text-slate-400 text-lg mt-1">No data</div>
+            <p className="text-xs text-[#64748B] mt-1">Schedule a habit to begin</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium">Risk Score</CardTitle>
-            <ShieldAlert className="w-4 h-4 text-emerald-500" />
+            <ShieldAlert className="w-4 h-4 text-slate-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">Low <span className="text-sm font-normal text-[#64748B] ml-1">(12%)</span></div>
-            <p className="text-xs text-[#64748B] mt-1">Burnout risk is minimal</p>
+            <div className="text-2xl font-bold text-slate-400 text-lg mt-1">Pending</div>
+            <p className="text-xs text-[#64748B] mt-1">Requires more conversations</p>
           </CardContent>
         </Card>
       </div>
@@ -63,51 +115,43 @@ export default function DashboardOverviewPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Daily Summary */}
-          <Card className="bg-[#4F46E5] border-none p-6 rounded-2xl shadow-xl shadow-indigo-500/20">
-            <CardHeader className="p-0 mb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-white" />
-                <CardTitle className="font-bold text-white text-base">Daily Recommendation</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <p className="text-indigo-100 text-sm leading-relaxed mb-4">
-                Good morning! You&apos;ve been maintaining a strong study habit for the past 4 days. Your stress levels are currently low, but I noticed you mentioned being tired in a Discord message last night. Let&apos;s make sure you get to bed by 11 PM tonight. Your main focus today is the AI Engineer prep material.
-              </p>
-              <button className="w-full py-2 bg-white text-[#4F46E5] text-xs font-bold rounded-lg">Acknowledge</button>
-            </CardContent>
-          </Card>
-
-          {/* Today&apos;s Tasks */}
+          {/* Today's Tasks */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Today&apos;s Focus</CardTitle>
-              <CardDescription>Generated based on your goals and routine</CardDescription>
+              <CardDescription>Tasks scheduled for today</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  { text: "Complete Neural Networks Chapter 4", time: "10:00 AM", status: "completed" },
-                  { text: "Submit Project Proposal", time: "2:00 PM", status: "pending" },
-                  { text: "Evening Workout (30m)", time: "6:30 PM", status: "pending" },
-                ].map((task, i) => (
-                  <div key={i} className="flex items-center gap-4 p-3 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                    <div className={`w-5 h-5 rounded-full flex items-center justify-center border ${
-                      task.status === "completed" ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 dark:border-slate-600"
-                    }`}>
-                      {task.status === "completed" && <CheckCircle2 className="w-3 h-3" />}
+                {tasks.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                    <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-500 rounded-full flex items-center justify-center mb-3">
+                      <CalendarX className="w-6 h-6" />
                     </div>
-                    <div className="flex-1">
-                      <div className={`font-medium ${task.status === "completed" ? "line-through text-slate-500" : ""}`}>
-                        {task.text}
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-500 font-medium bg-white dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700">
-                      {task.time}
-                    </div>
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">No tasks for today!</p>
+                    <p className="text-xs text-slate-500 mt-1">Enjoy your free time, or ask your Guardian to schedule some goals.</p>
                   </div>
-                ))}
+                ) : (
+                  tasks.map((task) => (
+                    <div key={task.id} className="flex items-center gap-4 p-3 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center border ${
+                        task.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 dark:border-slate-600"
+                      }`}>
+                        {task.completed && <CheckCircle2 className="w-3 h-3" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className={`font-medium ${task.completed ? "line-through text-slate-500" : ""}`}>
+                          {task.title}
+                        </div>
+                      </div>
+                      {task.dueDate && (
+                        <div className="text-xs text-slate-500 font-medium bg-white dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700">
+                          {formatTime(task.dueDate)}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -122,25 +166,25 @@ export default function DashboardOverviewPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <div className="flex justify-between text-xs mb-1.5">
+                <div className="flex justify-between text-xs mb-1.5 opacity-50">
                   <span className="font-medium">Motivation</span>
-                  <span className="text-[#64748B]">85%</span>
+                  <span className="text-[#64748B]">--%</span>
                 </div>
-                <Progress value={85} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#4F46E5]" />
+                <Progress value={0} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#4F46E5]" />
               </div>
               <div className="space-y-2">
-                <div className="flex justify-between text-xs mb-1.5">
+                <div className="flex justify-between text-xs mb-1.5 opacity-50">
                   <span className="font-medium">Confidence</span>
-                  <span className="text-[#64748B]">72%</span>
+                  <span className="text-[#64748B]">--%</span>
                 </div>
-                <Progress value={72} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#8B5CF6]" />
+                <Progress value={0} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#8B5CF6]" />
               </div>
               <div className="space-y-2">
-                <div className="flex justify-between text-xs mb-1.5">
+                <div className="flex justify-between text-xs mb-1.5 opacity-50">
                   <span className="font-medium">Stress</span>
-                  <span className="text-[#64748B]">30%</span>
+                  <span className="text-[#64748B]">--%</span>
                 </div>
-                <Progress value={30} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#10B981]" />
+                <Progress value={0} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#10B981]" />
               </div>
             </CardContent>
           </Card>
@@ -150,21 +194,29 @@ export default function DashboardOverviewPage() {
             <CardHeader>
               <div className="flex justify-between items-center">
                 <CardTitle className="text-lg">Latest Memory</CardTitle>
-                <Badge variant="outline" className="text-xs font-normal">2 hours ago</Badge>
+                {latestLog && (
+                  <Badge variant="outline" className="text-xs font-normal">{getTimeAgo(latestLog.createdAt)}</Badge>
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              <div className="p-4 bg-slate-50 dark:bg-[#0F172A] rounded-xl border border-slate-100 dark:border-[#1E293B] relative">
-                <div className="absolute top-4 left-4 w-10 h-10 rounded-lg bg-[#4F46E5]/10 flex items-center justify-center text-[#4F46E5]">
-                  <TrendingUp className="w-5 h-5" />
+              {latestLog ? (
+                <div className="p-4 bg-slate-50 dark:bg-[#0F172A] rounded-xl border border-slate-100 dark:border-[#1E293B] relative">
+                  <div className="absolute top-4 left-4 w-10 h-10 rounded-lg bg-[#4F46E5]/10 flex items-center justify-center text-[#4F46E5]">
+                    <TrendingUp className="w-5 h-5" />
+                  </div>
+                  <div className="ml-14">
+                    <p className="text-sm font-medium">
+                      &quot;{latestLog.summary}&quot;
+                    </p>
+                    <p className="text-[10px] text-[#4F46E5] mt-2 capitalize">Mood: {latestLog.overallMood}</p>
+                  </div>
                 </div>
-                <div className="ml-14">
-                  <p className="text-sm font-medium">
-                    &quot;I&apos;m feeling a bit anxious about the upcoming interview tomorrow morning.&quot;
-                  </p>
-                  <p className="text-[10px] text-[#4F46E5] mt-2">Captured from WhatsApp • 2h ago</p>
+              ) : (
+                <div className="p-6 text-center bg-slate-50 dark:bg-[#0F172A] rounded-xl border border-dashed border-slate-200 dark:border-[#1E293B]">
+                  <p className="text-sm text-slate-500">No memories recorded yet.</p>
                 </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
