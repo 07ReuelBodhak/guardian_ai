@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
-import { Brain, MessageCircle, Mail, ArrowRight, Check, Loader2 } from "lucide-react";
+import { Brain, MessageCircle, ArrowRight, Check, Loader2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import { generateDiscordConnectCode, checkDiscordConnection } from "@/app/actions/discord";
+import { generateTelegramConnectCode, checkTelegramConnection } from "@/app/actions/telegram";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -21,6 +24,46 @@ export default function OnboardingPage() {
   const [occupation, setOccupation] = useState("");
   const [motivationStyle, setMotivationStyle] = useState("");
   const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
+  const [fullyConnectedPlatforms, setFullyConnectedPlatforms] = useState<string[]>([]);
+
+  // Dialog States
+  const [isDiscordDialogOpen, setIsDiscordDialogOpen] = useState(false);
+  const [connectCode, setConnectCode] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  const [isTelegramDialogOpen, setIsTelegramDialogOpen] = useState(false);
+  const [telegramConnectCode, setTelegramConnectCode] = useState<string | null>(null);
+  const [isGeneratingTelegram, setIsGeneratingTelegram] = useState(false);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isDiscordDialogOpen) {
+      interval = setInterval(async () => {
+        const isConnected = await checkDiscordConnection();
+        if (isConnected) {
+          setIsDiscordDialogOpen(false);
+          toast.success("Discord Connected successfully!");
+          setFullyConnectedPlatforms(prev => Array.from(new Set([...prev, "discord"])));
+        }
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [isDiscordDialogOpen]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isTelegramDialogOpen) {
+      interval = setInterval(async () => {
+        const isConnected = await checkTelegramConnection();
+        if (isConnected) {
+          setIsTelegramDialogOpen(false);
+          toast.success("Telegram Connected successfully!");
+          setFullyConnectedPlatforms(prev => Array.from(new Set([...prev, "telegram"])));
+        }
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [isTelegramDialogOpen]);
 
   const handleNext = async () => {
     if (step < 3) {
@@ -41,7 +84,6 @@ export default function OnboardingPage() {
         });
         if (res.ok) {
           // Force a hard navigation to clear all Next.js client-side router caches 
-          // and ensure the dashboard fetches fresh auth state from the server.
           window.location.href = "/dashboard";
         } else {
           console.error("Failed to complete onboarding");
@@ -64,6 +106,50 @@ export default function OnboardingPage() {
     if (step === 1) return name.trim() !== "" && timezone !== "" && occupation !== "";
     if (step === 2) return motivationStyle !== "";
     return true; 
+  };
+
+  const handleConnectDiscord = async () => {
+    setIsGenerating(true);
+    setIsDiscordDialogOpen(true);
+    try {
+      const code = await generateDiscordConnectCode();
+      setConnectCode(code);
+      if (!connectedPlatforms.includes("discord")) {
+        setConnectedPlatforms(prev => [...prev, "discord"]);
+      }
+    } catch (err) {
+      toast.error("Failed to generate connect code");
+    }
+    setIsGenerating(false);
+  };
+
+  const handleConnectTelegram = async () => {
+    setIsGeneratingTelegram(true);
+    setIsTelegramDialogOpen(true);
+    try {
+      const code = await generateTelegramConnectCode();
+      setTelegramConnectCode(code);
+      if (!connectedPlatforms.includes("telegram")) {
+        setConnectedPlatforms(prev => [...prev, "telegram"]);
+      }
+    } catch (err) {
+      toast.error("Failed to generate connect code");
+    }
+    setIsGeneratingTelegram(false);
+  };
+
+  const copyToClipboard = () => {
+    if (connectCode) {
+      navigator.clipboard.writeText(`!connect ${connectCode}`);
+      toast.success("Copied to clipboard!");
+    }
+  };
+
+  const copyTelegramCode = () => {
+    if (telegramConnectCode) {
+      navigator.clipboard.writeText(`!connect ${telegramConnectCode}`);
+      toast.success("Copied to clipboard!");
+    }
   };
 
   return (
@@ -198,11 +284,12 @@ export default function OnboardingPage() {
                 </div>
                 <div className="space-y-3">
                   {[
-                    { id: "telegram", name: "Telegram", icon: <MessageCircle className="h-5 w-5" />, color: "text-[#0088cc]", bg: "bg-[#0088cc]/10" },
-                    { id: "discord", name: "Discord", icon: <MessageCircle className="h-5 w-5" />, color: "text-[#5865F2]", bg: "bg-[#5865F2]/10" },
-                    { id: "email", name: "Email", icon: <Mail className="h-5 w-5" />, color: "text-rose-500", bg: "bg-rose-500/10" },
+                    { id: "telegram", name: "Telegram", icon: <MessageCircle className="h-5 w-5" />, color: "text-[#0088cc]", bg: "bg-[#0088cc]/10", onClick: handleConnectTelegram },
+                    { id: "discord", name: "Discord", icon: <MessageCircle className="h-5 w-5" />, color: "text-[#5865F2]", bg: "bg-[#5865F2]/10", onClick: handleConnectDiscord },
                   ].map((platform, i) => {
-                    const isConnected = connectedPlatforms.includes(platform.id);
+                    const isInitiated = connectedPlatforms.includes(platform.id);
+                    const isFullyConnected = fullyConnectedPlatforms.includes(platform.id);
+                    
                     return (
                     <div key={i} className="flex items-center justify-between p-4 border rounded-xl bg-slate-50/50 dark:bg-slate-900/50">
                       <div className="flex items-center gap-4">
@@ -211,23 +298,25 @@ export default function OnboardingPage() {
                         </div>
                         <div>
                           <div className="font-medium">{platform.name}</div>
-                          <div className="text-xs text-slate-500">{isConnected ? 'Connected' : 'Not connected'}</div>
+                          <div className="text-xs text-slate-500">
+                            {isFullyConnected ? (
+                              <span className="text-emerald-600 font-medium">Connected</span>
+                            ) : isInitiated ? (
+                              'Setup Initiated'
+                            ) : (
+                              'Not connected'
+                            )}
+                          </div>
                         </div>
                       </div>
                       <Button 
-                        variant={isConnected ? "outline" : "default"} 
+                        variant={isInitiated || isFullyConnected ? "outline" : "default"} 
                         size="sm" 
-                        className={!isConnected ? "bg-indigo-600 hover:bg-indigo-700" : ""}
-                        onClick={() => {
-                          if (isConnected) {
-                            setConnectedPlatforms(prev => prev.filter(p => p !== platform.id));
-                          } else {
-                            // In a real app this would open OAuth or magic link flow
-                            setConnectedPlatforms(prev => [...prev, platform.id]);
-                          }
-                        }}
+                        className={!isInitiated && !isFullyConnected ? "bg-indigo-600 hover:bg-indigo-700" : ""}
+                        onClick={platform.onClick}
+                        disabled={isFullyConnected}
                       >
-                        {isConnected ? "Manage" : "Connect"}
+                        {isFullyConnected ? "Connected" : isInitiated ? "View Code" : "Connect"}
                       </Button>
                     </div>
                   )})}
@@ -260,6 +349,94 @@ export default function OnboardingPage() {
           </Button>
         </div>
       </Card>
+
+      {/* Discord Connect Dialog */}
+      <Dialog open={isDiscordDialogOpen} onOpenChange={setIsDiscordDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-[#5865F2]" />
+              Connect Discord
+            </DialogTitle>
+            <DialogDescription>
+              Because of Discord's security rules, you must share a server with Guardian AI before it can DM you.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="my-2 space-y-4">
+            <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 p-4 rounded-lg text-sm border border-blue-100 dark:border-blue-900/50">
+              <h4 className="font-bold mb-2">Step 1: Join the Official Server</h4>
+              <p className="mb-3">Guardian AI cannot message you until you join its home server.</p>
+              <Button 
+                className="w-full bg-[#5865F2] hover:bg-[#4752C4] text-white"
+                onClick={() => window.open(`https://discord.gg/y9Bd9Y2zGT`, '_blank')}
+              >
+                Join Guardian AI Server
+              </Button>
+            </div>
+
+            <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800">
+              <h4 className="font-bold text-sm mb-2 text-slate-800 dark:text-slate-200">Step 2: Send your Code</h4>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
+                Once inside the server, copy your code and click the button below to DM Guardian AI:
+              </p>
+              <div className="flex items-center justify-between bg-white dark:bg-black p-3 rounded-md border border-slate-200 dark:border-slate-800 mb-3">
+                <code className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  {isGenerating ? "..." : `!connect ${connectCode}`}
+                </code>
+                <Button size="icon" variant="ghost" onClick={copyToClipboard} disabled={isGenerating}>
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+              <Button 
+                variant="outline"
+                className="w-full text-slate-700 dark:text-slate-300"
+                onClick={() => window.open(`https://discord.com/users/${process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID || '1532718363867086878'}`, '_blank')}
+              >
+                Message Bot on Discord
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Telegram Connect Dialog */}
+      <Dialog open={isTelegramDialogOpen} onOpenChange={setIsTelegramDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-[#0088cc]" />
+              Connect Telegram
+            </DialogTitle>
+            <DialogDescription>
+              Link Guardian AI to your Telegram account.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="my-2 space-y-4">
+            <div className="bg-slate-100 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800">
+              <h4 className="font-bold text-sm mb-2 text-slate-800 dark:text-slate-200">Send your Code</h4>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
+                Copy your code and click the button below to message Guardian AI on Telegram:
+              </p>
+              <div className="flex items-center justify-between bg-white dark:bg-black p-3 rounded-md border border-slate-200 dark:border-slate-800 mb-3">
+                <code className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  {isGeneratingTelegram ? "..." : `!connect ${telegramConnectCode}`}
+                </code>
+                <Button size="icon" variant="ghost" onClick={copyTelegramCode} disabled={isGeneratingTelegram}>
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+              <Button 
+                className="w-full bg-[#0088cc] hover:bg-[#0077b3] text-white"
+                onClick={() => window.open(`https://t.me/${process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'Gaurdian_AI_bot'}`, '_blank')}
+              >
+                Message Bot on Telegram
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

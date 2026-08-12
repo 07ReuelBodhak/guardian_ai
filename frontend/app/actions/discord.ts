@@ -36,3 +36,15 @@ export async function disconnectDiscord() {
     },
   });
 }
+
+export async function checkDiscordConnection() {
+  const session = await auth();
+  if (!session?.user?.id) return false;
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { discordId: true }
+  });
+
+  return !!user?.discordId;
+}
