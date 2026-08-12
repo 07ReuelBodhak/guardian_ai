@@ -36,3 +36,15 @@ export async function disconnectTelegram() {
     },
   });
 }
+
+export async function checkTelegramConnection() {
+  const session = await auth();
+  if (!session?.user?.id) return false;
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { telegramId: true }
+  });
+
+  return !!user?.telegramId;
+}
