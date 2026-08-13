@@ -36,13 +36,31 @@ The frontend heavily utilizes Next.js Server Actions and API Routes to interact 
    ```
 
 2. **Environment Variables**
-   Ensure you have a `.env` file with your live database credentials:
+   Ensure you have a `.env.local` (or `.env`) file in the frontend directory with your required credentials. Based on our setup, you will need the following variables:
    ```env
-   DATABASE_URL="postgres://user:password@host:port/database"
-   AUTH_SECRET="your-auth-secret-here"
-   # OAuth providers if configured
-   # GOOGLE_CLIENT_ID="..."
-   # GOOGLE_CLIENT_SECRET="..."
+   # Database Configuration
+   DATABASE_URL="file:./dev.db" # Or your PostgreSQL/MySQL URL
+
+   # NextAuth / Auth.js Configuration
+   AUTH_SECRET="a_secure_random_string_for_encryption"
+
+   # Google OAuth (For Google Login)
+   AUTH_GOOGLE_ID="your_google_client_id"
+   AUTH_GOOGLE_SECRET="your_google_client_secret"
+
+   # Discord OAuth & Bot Configuration
+   AUTH_DISCORD_ID="your_discord_client_id"
+   AUTH_DISCORD_SECRET="your_discord_client_secret"
+   NEXT_PUBLIC_DISCORD_CLIENT_ID="your_discord_client_id"
+   DISCORD_BOT_TOKEN="your_discord_bot_token"
+
+   # Telegram Bot Configuration
+   TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
+   NEXT_PUBLIC_TELEGRAM_BOT_USERNAME="your_telegram_bot_username"
+
+   # Caspian Platform Integration
+   CASPIAN_API_KEY="your_caspian_api_key"
+   CASPIAN_BASE_URL="https://api.trycaspianai.com"
    ```
 
 3. **Run the Development Server**

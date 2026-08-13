@@ -223,11 +223,19 @@ def proactive_scheduler_loop():
             cursor = conn.cursor()
             
             # Get all users connected via Caspian platforms
-            cursor.execute("SELECT id, name, discordId, timezone, lastMorningCheckIn, lastNightCheckIn, motivation FROM User WHERE discordId IS NOT NULL")
+            cursor.execute("SELECT id, name, discordId, telegramId, preferredPlatform, timezone, lastMorningCheckIn, lastNightCheckIn, motivation FROM User WHERE discordId IS NOT NULL OR telegramId IS NOT NULL")
             users = cursor.fetchall()
             
             for user_row in users:
-                uid, name, discord_id, tz_str, last_morning, last_night, persona = user_row
+                uid, name, discord_id, telegram_id, pref_platform, tz_str, last_morning, last_night, persona = user_row
+                
+                # Determine target platform based on preference with fallback
+                if pref_platform == 'telegram' and telegram_id:
+                    target_platform_id = telegram_id
+                elif discord_id:
+                    target_platform_id = discord_id
+                else:
+                    target_platform_id = telegram_id
                 if not tz_str: tz_str = "Asia/Kolkata"
                 try: tz = ZoneInfo(tz_str)
                 except: tz = ZoneInfo("Asia/Kolkata")
@@ -253,7 +261,7 @@ def proactive_scheduler_loop():
                     
                     res = analysis_llm.invoke([HumanMessage(content=prompt)])
                     msg_content = res.content.strip()
-                    proactive_send(discord_id, msg_content)
+                    proactive_send(target_platform_id, msg_content)
                         
                     cursor.execute("UPDATE User SET lastMorningCheckIn = ? WHERE id = ?", (today_str, uid))
                     conn.commit()
@@ -274,7 +282,7 @@ def proactive_scheduler_loop():
                         
                         res = analysis_llm.invoke([HumanMessage(content=prompt)])
                         msg_content = res.content.strip()
-                        proactive_send(discord_id, msg_content)
+                        proactive_send(target_platform_id, msg_content)
                             
                         cursor.execute("UPDATE User SET lastNightCheckIn = ? WHERE id = ?", (today_str, uid))
                         conn.commit()
@@ -297,11 +305,19 @@ def habit_scheduler_loop():
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             
-            cursor.execute("SELECT id, name, discordId, timezone, motivation FROM User WHERE discordId IS NOT NULL")
+            cursor.execute("SELECT id, name, discordId, telegramId, preferredPlatform, timezone, motivation FROM User WHERE discordId IS NOT NULL OR telegramId IS NOT NULL")
             users = cursor.fetchall()
             
             for user_row in users:
-                uid, name, discord_id, tz_str, persona = user_row
+                uid, name, discord_id, telegram_id, pref_platform, tz_str, persona = user_row
+                
+                # Determine target platform based on preference with fallback
+                if pref_platform == 'telegram' and telegram_id:
+                    target_platform_id = telegram_id
+                elif discord_id:
+                    target_platform_id = discord_id
+                else:
+                    target_platform_id = telegram_id
                 if not tz_str: tz_str = "Asia/Kolkata"
                 try: tz = ZoneInfo(tz_str)
                 except: tz = ZoneInfo("Asia/Kolkata")
@@ -336,7 +352,7 @@ def habit_scheduler_loop():
                         f"Do NOT just say 'it's time for your habit called X'. Make it natural. Persona: {persona or 'friendly'}"
                     )
                     msg_content = analysis_llm.invoke([HumanMessage(content=prompt)]).content.strip()
-                    proactive_send(discord_id, msg_content)
+                    proactive_send(target_platform_id, msg_content)
                     conn.commit()
                     print(f"[Habit] Triggered '{title}' for {name}")
 
@@ -376,7 +392,7 @@ def habit_scheduler_loop():
                         cursor.execute("UPDATE HabitExecution SET reminderStep = ?, status = ?, lastContactedAt = ? WHERE id = ?", (new_step, new_status, now_utc_str, eid))
                         conn.commit()
                         if msg_to_send:
-                            proactive_send(discord_id, msg_to_send)
+                            proactive_send(target_platform_id, msg_to_send)
             conn.close()
         except Exception as e:
             print(f"[Habit Scheduler] Error: {e}")
