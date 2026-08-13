@@ -23,6 +23,7 @@ model User {
   proactiveCheckins   Boolean   @default(true)
   autoMonthlyReport   Boolean   @default(true)
   emergencyEscalation Boolean   @default(false)
+  preferredPlatform   String    @default("discord")
   pendingTaskContext  String?
   lastMorningCheckIn  String?
   lastNightCheckIn    String?
