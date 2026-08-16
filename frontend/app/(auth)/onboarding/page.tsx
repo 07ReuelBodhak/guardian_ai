@@ -203,7 +203,7 @@ export default function OnboardingPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="timezone">Timezone</Label>
-                    <Select value={timezone} onValueChange={setTimezone}>
+                    <Select value={timezone} onValueChange={(val) => setTimezone(val || "Asia/Kolkata")}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select your timezone" />
                       </SelectTrigger>
@@ -223,8 +223,8 @@ export default function OnboardingPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="occupation">Occupation</Label>
-                    <Select value={occupation} onValueChange={setOccupation}>
+                    <Label htmlFor="occupation">Current Status / Occupation</Label>
+                    <Select value={occupation} onValueChange={(val) => setOccupation(val || "")}>
                       <SelectTrigger>
                         <SelectValue placeholder="What do you do?" />
                       </SelectTrigger>

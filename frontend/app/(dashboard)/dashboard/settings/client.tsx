@@ -86,7 +86,7 @@ export default function SettingsClient({ user }: { user: UserData }) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="timezone">Timezone</Label>
-              <Select value={timezone} onValueChange={setTimezone}>
+              <Select value={timezone} onValueChange={(val) => setTimezone(val || "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select timezone" />
                 </SelectTrigger>
@@ -239,3 +239,4 @@ export default function SettingsClient({ user }: { user: UserData }) {
     </Tabs>
   );
 }
+
