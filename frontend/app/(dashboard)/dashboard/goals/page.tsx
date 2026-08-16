@@ -36,7 +36,11 @@ export default async function GoalsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <TaskList initialTasks={dbTasks} />
+            <TaskList initialTasks={dbTasks.map(t => ({
+              ...t,
+              dueDate: t.dueDate ? t.dueDate.toISOString() : null,
+              createdAt: t.createdAt.toISOString()
+            }))} />
           </CardContent>
         </Card>
       </div>

@@ -182,8 +182,8 @@ export default function SettingsClient({ user }: { user: UserData }) {
               <Select 
                 value={motivation} 
                 onValueChange={(val) => {
-                  setMotivation(val);
-                  handleSavePreferences({ motivation: val });
+                  setMotivation(val || "friendly");
+                  handleSavePreferences({ motivation: val || "friendly" });
                 }}
               >
                 <SelectTrigger>

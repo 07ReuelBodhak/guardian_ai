@@ -207,7 +207,7 @@ export default function OnboardingPage() {
                       <SelectTrigger>
                         <SelectValue placeholder="Select your timezone" />
                       </SelectTrigger>
-                      <SelectContent position="popper" className="max-h-[250px]">
+                      <SelectContent  className="max-h-[250px]">
                         <SelectItem value="pst">Pacific Time (US & Canada)</SelectItem>
                         <SelectItem value="est">Eastern Time (US & Canada)</SelectItem>
                         <SelectItem value="brt">Brasília Time (BRT)</SelectItem>
@@ -228,7 +228,7 @@ export default function OnboardingPage() {
                       <SelectTrigger>
                         <SelectValue placeholder="What do you do?" />
                       </SelectTrigger>
-                      <SelectContent position="popper">
+                      <SelectContent >
                         <SelectItem value="student">Student</SelectItem>
                         <SelectItem value="developer">Developer</SelectItem>
                         <SelectItem value="professional">Professional</SelectItem>
@@ -440,3 +440,4 @@ export default function OnboardingPage() {
     </div>
   );
 }
+
