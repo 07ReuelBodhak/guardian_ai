@@ -244,8 +244,8 @@ def proactive_scheduler_loop():
                 today_str = now_local.strftime("%Y-%m-%d")
                 current_hour = now_local.hour
                 
-                # Morning Check-in (between 9:00 and 9:59 AM)
-                if current_hour == 9 and last_morning != today_str:
+                # Morning Check-in (between 8:00 and 8:59 AM)
+                if current_hour == 8 and last_morning != today_str:
                     cursor.execute("SELECT title, dueDate FROM Task WHERE userId = ? AND status != 'completed' ORDER BY dueDate ASC LIMIT 5", (uid,))
                     tasks_rows = cursor.fetchall()
                     task_str = "No tasks for today!"
@@ -403,274 +403,314 @@ def habit_scheduler_loop():
 
 @caspian_client.on_message
 def on_message(message):
-    text = getattr(message, 'text', getattr(message, 'content', '')).strip()
-    sender_id = str(getattr(message, 'sender_id', getattr(message, 'author_id', 'unknown')))
-    platform = getattr(message, 'platform', 'unknown')
+    def process():
+        text = getattr(message, 'text', getattr(message, 'content', '')).strip()
+        sender_id = str(getattr(message, 'sender_id', getattr(message, 'author_id', 'unknown')))
+        platform = getattr(message, 'platform', 'unknown')
+        
+        print(f"[{platform.upper()}] Received message from {sender_id}: {text}")
     
-    print(f"[{platform.upper()}] Received message from {sender_id}: {text}")
-    
-    # ── Handle Account Connect ──
-    if text.startswith("!connect "):
-        code = text.split(" ")[1]
-        try:
-            conn_db = sqlite3.connect(DB_PATH)
-            cursor = conn_db.cursor()
-            cursor.execute("SELECT id FROM User WHERE discordConnectCode = ?", (code,))
-            row = cursor.fetchone()
-            
-            if row:
-                user_id = row[0]
-                cursor.execute(
-                    "UPDATE User SET discordId = ?, discordConnectCode = NULL WHERE id = ?",
-                    (sender_id, user_id)
-                )
-                conn_db.commit()
-                if hasattr(message, 'reply'): message.reply(f"Successfully connected your {platform.capitalize()} account to AiGuardian!")
-                conn_db.close()
-                return
-                
-            if hasattr(message, 'reply'): message.reply("Invalid or expired connect code. Please generate a new one from the dashboard.")
-            conn_db.close()
-        except Exception as e:
-            print(f"Database error: {e}")
-            if hasattr(message, 'reply'): message.reply("An internal error occurred while trying to connect your account.")
-    else:
-        # ── AI Agent Logic ──
-        try:
-            user_id = "unknown_user"
-            user_baseline = "No baseline established yet."
-            user_name = "User"
-            motivation_style = "friendly"
-            pending_task_context = "{}"
-            user_timezone = "Asia/Kolkata"
-            
+        # ── Handle Account Connect ──
+        if text.startswith("!connect "):
+            code = text.split(" ")[1]
             try:
                 conn_db = sqlite3.connect(DB_PATH)
                 cursor = conn_db.cursor()
-                cursor.execute(
-                    "SELECT id, textingBaseline, name, motivation, pendingTaskContext, timezone FROM User WHERE discordId = ?", 
-                    (sender_id,)
-                )
-                row = cursor.fetchone()
-                if row:
-                    user_id, user_baseline_raw, user_name_raw, motivation_raw, pending_task_context_raw, tz = row
-                    user_baseline = user_baseline_raw if user_baseline_raw else user_baseline
-                    user_name = user_name_raw if user_name_raw else user_name
-                    motivation_style = motivation_raw if motivation_raw else motivation_style
-                    pending_task_context = pending_task_context_raw if pending_task_context_raw else "{}"
-                    user_timezone = tz if tz else "Asia/Kolkata"
-                conn_db.close()
-            except Exception as db_e:
-                print(f"Database lookup error for baseline: {db_e}")
-                
-            if user_id == "unknown_user":
-                if hasattr(message, 'reply'): message.reply("Sorry, your account is not linked to Guardian AI! Please go to your dashboard, generate a connect code, and send it here using `!connect <code>`.")
-                return
-
-            # ── Sanitize input: strip system-reserved bracket tokens ──
-            text = text.replace("[[", "").replace("]]", "")
-
-            user_msg_id = log_message_to_db(user_id, "user", text)
-            threading.Thread(target=embed_message_sync, args=(user_msg_id, text, user_id, "user"), daemon=True).start()
-                
-            history_messages = []
-            try:
-                conn_db = sqlite3.connect(DB_PATH)
-                cursor = conn_db.cursor()
-                cursor.execute("SELECT role, text FROM Message WHERE userId = ? ORDER BY createdAt DESC LIMIT 10", (user_id,))
-                rows = cursor.fetchall()
-                conn_db.close()
-                for r, t in rows[::-1]:
-                    if r == "user": history_messages.append(HumanMessage(content=t))
-                    else: history_messages.append(AIMessage(content=t))
-            except Exception as e:
-                print(f"Error loading history: {e}")
-                history_messages = [HumanMessage(content=text)]
-                
-            long_term_memory = ""
-            try:
-                from vector_store import query as query_vector
-                results = query_vector(text, user_id, 3)
-                if results:
-                    mem_parts = []
-                    for r in results:
-                        if r.get("distance", 1.0) > 0.05:
-                            prefix = "User said:" if r["role"] == "user" else "You (Guardian) said:"
-                            mem_parts.append(f"- {prefix} {r['text']}")
-                    if mem_parts:
-                        long_term_memory = "\n".join(mem_parts)
-            except Exception as e:
-                print(f"Error querying ChromaDB: {e}")
-
-            # ── Fetch active tasks ──
-            active_tasks_str, pending_habits_str = "No active tasks.", "No pending habits."
-            try:
-                conn_db = sqlite3.connect(DB_PATH)
-                cursor = conn_db.cursor()
-                cursor.execute("SELECT COUNT(*) FROM Task WHERE userId = ?", (user_id,))
-                total_tasks = cursor.fetchone()[0]
-                
-                cursor.execute("SELECT id, title, dueDate, status FROM Task WHERE userId = ? AND status != 'completed' ORDER BY dueDate ASC, createdAt DESC LIMIT 5", (user_id,))
-                tasks_rows = cursor.fetchall()
-                if tasks_rows:
-                    lines = [f"- [ID: {t[0]}] {t[1]} (Due: {t[2] or 'No date'}) [Status: {t[3]}]" for t in tasks_rows]
-                    if total_tasks > 5: lines.append(f"...and {total_tasks - 5} more pending tasks.")
-                    active_tasks_str = "\n".join(lines)
-                
-                today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-                cursor.execute('''SELECT e.id, h.title, e.reminderStep FROM HabitExecution e JOIN ScheduledHabit h ON e.scheduledHabitId = h.id WHERE e.userId = ? AND e.status = 'pending' AND e.dateString = ?''', (user_id, today_str))
-                habit_rows = cursor.fetchall()
-                conn_db.close()
-                if habit_rows:
-                    pending_habits_str = "\n".join([f"- [HabitID: {h[0]}] {h[1]} (Step: {h[2]})" for h in habit_rows])
-            except Exception as e:
-                print(f"Error fetching active tasks or habits: {e}")
-
-            inputs = {
-                "messages": history_messages,
-                "user_id": user_id,
-                "user_name": user_name,
-                "motivation_style": motivation_style,
-                "user_baseline": user_baseline,
-                "long_term_memory": long_term_memory,
-                "pending_task_context": pending_task_context,
-                "active_tasks": active_tasks_str,
-                "pending_habit_executions": pending_habits_str,
-                "user_timezone": user_timezone
-            }
-            
-            print("\nInvoking LangGraph Multi-Agent Orchestrator...")
-            result = app.invoke(inputs)
-            final_response = result["messages"][-1].content
-            
-            # Check for Planner Agent state updates
-            new_pending_task = result.get("pending_task_context", "{}")
-            if new_pending_task != pending_task_context:
-                try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    cursor.execute("UPDATE User SET pendingTaskContext = ? WHERE id = ?", (new_pending_task, user_id))
-                    conn_db.commit()
-                    conn_db.close()
-                except Exception as e:
-                    print(f"Failed to update pending task context: {e}")
-
-            # Extract SAVE_TASK payload
-            json_match = re.search(r'\[\[SAVE_TASK_START\]\](.*?)\[\[SAVE_TASK_END\]\]', final_response, re.DOTALL)
-            if json_match:
-                try:
-                    task_data = json.loads(json_match.group(1).strip())["SAVE_TASK"]
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    task_id = generate_cuid()
-                    due_date = task_data.get("dueDate", None)
-                    if due_date and (due_date == "YYYY-MM-DDTHH:MM:SSZ" or "YYYY" in due_date): due_date = None
-                        
-                    cursor.execute(
-                        "INSERT INTO Task (id, userId, title, description, priority, dueDate) VALUES (?, ?, ?, ?, ?, ?)",
-                        (task_id, user_id, task_data.get("title", "New Task"), task_data.get("description", ""), task_data.get("priority", "medium"), due_date)
-                    )
-                    cursor.execute("UPDATE User SET pendingTaskContext = '{}' WHERE id = ?", (user_id,))
-                    conn_db.commit()
-                    conn_db.close()
-                    final_response = final_response.replace(json_match.group(0), "").strip()
-                except Exception as e:
-                    print(f"Error saving task to DB: {e}")
-
-            # Extract UPDATE_TASK_STATUS
-            update_match = re.search(r'\[\[UPDATE_TASK_STATUS (.*?) (.*?)\]\]', final_response)
-            if update_match:
-                task_id_to_update, new_status = update_match.group(1).strip(), update_match.group(2).strip()
-                try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    if new_status == 'completed':
-                        cursor.execute("UPDATE Task SET status = ?, completed = 1 WHERE id = ?", (new_status, task_id_to_update))
-                    else:
-                        cursor.execute("UPDATE Task SET status = ? WHERE id = ?", (new_status, task_id_to_update))
-                    conn_db.commit()
-                    conn_db.close()
-                    final_response = final_response.replace(update_match.group(0), "").strip()
-                except Exception as e:
-                    print(f"Error updating task status in DB: {e}")
-
-            # Extract Habit tracking tokens
-            habit_complete_match = re.search(r'\[\[COMPLETE_HABIT_TODAY (.*?)\]\]', final_response)
-            if habit_complete_match:
-                habit_id = habit_complete_match.group(1).strip()
-                try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                    cursor.execute("UPDATE HabitExecution SET status = 'completed', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
-                    conn_db.commit()
-                    conn_db.close()
-                    final_response = final_response.replace(habit_complete_match.group(0), "").strip()
-                except Exception as e:
-                    print(f"Error completing habit: {e}")
-                    
-            habit_delay_match = re.search(r'\[\[DELAY_HABIT (.*?)\]\]', final_response)
-            if habit_delay_match:
-                habit_id = habit_delay_match.group(1).strip()
-                try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                    cursor.execute("UPDATE HabitExecution SET reminderStep = 'delayed', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
-                    conn_db.commit()
-                    conn_db.close()
-                    final_response = final_response.replace(habit_delay_match.group(0), "").strip()
-                except Exception as e:
-                    print(f"Error delaying habit: {e}")
-
-            habit_fail_match = re.search(r'\[\[FAIL_HABIT_TODAY (.*?)\]\]', final_response)
-            if habit_fail_match:
-                habit_id = habit_fail_match.group(1).strip()
-                try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                    cursor.execute("UPDATE HabitExecution SET status = 'failed', reminderStep = 'timeout', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
-                    conn_db.commit()
-                    conn_db.close()
-                    final_response = final_response.replace(habit_fail_match.group(0), "").strip()
-                except Exception as e:
-                    print(f"Error failing habit: {e}")
-
-            # Handle Emergency Detection
-            emergency_match = re.search(r'\[\[EMERGENCY_DETECTED\]\]', final_response)
-            if emergency_match:
-                try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    cursor.execute("SELECT u.emergencyEscalation, e.name, e.email FROM User u LEFT JOIN EmergencyContact e ON u.id = e.userId WHERE u.id = ?", (user_id,))
+                if platform == 'telegram':
+                    cursor.execute("SELECT id FROM User WHERE telegramConnectCode = ?", (code,))
                     row = cursor.fetchone()
-                    conn_db.close()
+                    if row:
+                        user_id = row[0]
+                        cursor.execute(
+                            "UPDATE User SET telegramId = ?, telegramConnectCode = NULL WHERE id = ?",
+                            (sender_id, user_id)
+                        )
+                        conn_db.commit()
+                        if hasattr(message, 'reply'): message.reply(f"Successfully connected your {platform.capitalize()} account to AiGuardian!")
+                        conn_db.close()
+                        return
+                else:
+                    cursor.execute("SELECT id FROM User WHERE discordConnectCode = ?", (code,))
+                    row = cursor.fetchone()
+                    if row:
+                        user_id = row[0]
+                        cursor.execute(
+                            "UPDATE User SET discordId = ?, discordConnectCode = NULL WHERE id = ?",
+                            (sender_id, user_id)
+                        )
+                        conn_db.commit()
+                        if hasattr(message, 'reply'): message.reply(f"Successfully connected your {platform.capitalize()} account to AiGuardian!")
+                        conn_db.close()
+                        return
                     
-                    if row and row[0]:  
-                        contact_name, contact_email = row[1], row[2]
-                        if contact_email:
-                            print(f"🚨 EMERGENCY DETECTED! Escalating to {contact_name} at {contact_email}...")
-                            email_text = f"SUBJECT: URGENT: Guardian AI Alert for {user_name} [TESTING]\n\n[TESTING / HACKATHON DEMO]\n\nURGENT: Guardian AI has detected that {user_name} is experiencing severe distress. Please check in on them immediately.\n\nLatest message context: '{text}'"
-                            if email_connection:
-                                caspian_client.initiate(
-                                    connection_id=email_connection["id"],
-                                    recipient=contact_email,
-                                    text=email_text
-                                )
-                                print(f"✅ Emergency email dispatched to {contact_email} via Caspian.")
-                    final_response = final_response.replace(emergency_match.group(0), "").strip()
+                if hasattr(message, 'reply'): message.reply("Invalid or expired connect code. Please generate a new one from the dashboard.")
+                conn_db.close()
+            except Exception as e:
+                print(f"Database error: {e}")
+                if hasattr(message, 'reply'): message.reply("An internal error occurred while trying to connect your account.")
+        else:
+            # ── AI Agent Logic ──
+            try:
+                user_id = "unknown_user"
+                user_baseline = "No baseline established yet."
+                user_name = "User"
+                motivation_style = "friendly"
+                pending_task_context = "{}"
+                user_timezone = "Asia/Kolkata"
+                
+                try:
+                    conn_db = sqlite3.connect(DB_PATH)
+                    cursor = conn_db.cursor()
+                    if platform == 'telegram':
+                        cursor.execute(
+                            "SELECT id, textingBaseline, name, motivation, pendingTaskContext, timezone FROM User WHERE telegramId = ?", 
+                            (sender_id,)
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT id, textingBaseline, name, motivation, pendingTaskContext, timezone FROM User WHERE discordId = ?", 
+                            (sender_id,)
+                        )
+                    row = cursor.fetchone()
+                    if row:
+                        user_id, user_baseline_raw, user_name_raw, motivation_raw, pending_task_context_raw, tz = row
+                        user_baseline = user_baseline_raw if user_baseline_raw else user_baseline
+                        user_name = user_name_raw if user_name_raw else user_name
+                        motivation_style = motivation_raw if motivation_raw else motivation_style
+                        pending_task_context = pending_task_context_raw if pending_task_context_raw else "{}"
+                        user_timezone = tz if tz else "Asia/Kolkata"
+                    conn_db.close()
+                except Exception as db_e:
+                    print(f"Database lookup error for baseline: {db_e}")
+                    
+                if user_id == "unknown_user":
+                    if hasattr(message, 'reply'): message.reply("Sorry, your account is not linked to Guardian AI! Please go to your dashboard, generate a connect code, and send it here using `!connect <code>`.")
+                    return
+    
+                # ── Sanitize input: strip system-reserved bracket tokens ──
+                text = text.replace("[[", "").replace("]]", "")
+    
+                user_msg_id = log_message_to_db(user_id, "user", text)
+                threading.Thread(target=embed_message_sync, args=(user_msg_id, text, user_id, "user"), daemon=True).start()
+                    
+                history_messages = []
+                try:
+                    conn_db = sqlite3.connect(DB_PATH)
+                    cursor = conn_db.cursor()
+                    cursor.execute("SELECT role, text FROM Message WHERE userId = ? ORDER BY createdAt DESC LIMIT 10", (user_id,))
+                    rows = cursor.fetchall()
+                    conn_db.close()
+                    for r, t in rows[::-1]:
+                        if r == "user": history_messages.append(HumanMessage(content=t))
+                        else: history_messages.append(AIMessage(content=t))
                 except Exception as e:
-                    print(f"Error handling emergency: {e}")
-
-            bot_msg_id = log_message_to_db(user_id, "ai", final_response)
-            threading.Thread(target=embed_message_sync, args=(bot_msg_id, final_response, user_id, "ai"), daemon=True).start()
-
-            if hasattr(message, 'reply'): message.reply(final_response)
-            
-        except Exception as e:
-            print(f"Agent Error: {e}")
-            if hasattr(message, 'reply'): message.reply("My internal orchestration encountered an error.")
+                    print(f"Error loading history: {e}")
+                    history_messages = [HumanMessage(content=text)]
+                    
+                long_term_memory = ""
+                try:
+                    from vector_store import query as query_vector
+                    results = query_vector(text, user_id, 3)
+                    if results:
+                        mem_parts = []
+                        for r in results:
+                            if r.get("distance", 1.0) > 0.05:
+                                prefix = "User said:" if r["role"] == "user" else "You (Guardian) said:"
+                                mem_parts.append(f"- {prefix} {r['text']}")
+                        if mem_parts:
+                            long_term_memory = "\n".join(mem_parts)
+                except Exception as e:
+                    print(f"Error querying ChromaDB: {e}")
+    
+                # ── Fetch active tasks ──
+                active_tasks_str, pending_habits_str = "No active tasks.", "No pending habits."
+                try:
+                    conn_db = sqlite3.connect(DB_PATH)
+                    cursor = conn_db.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM Task WHERE userId = ?", (user_id,))
+                    total_tasks = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT id, title, dueDate, status FROM Task WHERE userId = ? AND status != 'completed' ORDER BY dueDate ASC, createdAt DESC LIMIT 5", (user_id,))
+                    tasks_rows = cursor.fetchall()
+                    if tasks_rows:
+                        lines = [f"- [ID: {t[0]}] {t[1]} (Due: {t[2] or 'No date'}) [Status: {t[3]}]" for t in tasks_rows]
+                        if total_tasks > 5: lines.append(f"...and {total_tasks - 5} more pending tasks.")
+                        active_tasks_str = "\n".join(lines)
+                    
+                    today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+                    cursor.execute('''SELECT e.id, h.title, e.reminderStep FROM HabitExecution e JOIN ScheduledHabit h ON e.scheduledHabitId = h.id WHERE e.userId = ? AND e.status = 'pending' AND e.dateString = ?''', (user_id, today_str))
+                    habit_rows = cursor.fetchall()
+                    conn_db.close()
+                    if habit_rows:
+                        pending_habits_str = "\n".join([f"- [HabitID: {h[0]}] {h[1]} (Step: {h[2]})" for h in habit_rows])
+                except Exception as e:
+                    print(f"Error fetching active tasks or habits: {e}")
+    
+                inputs = {
+                    "messages": history_messages,
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "motivation_style": motivation_style,
+                    "user_baseline": user_baseline,
+                    "long_term_memory": long_term_memory,
+                    "pending_task_context": pending_task_context,
+                    "active_tasks": active_tasks_str,
+                    "pending_habit_executions": pending_habits_str,
+                    "user_timezone": user_timezone
+                }
+                
+                print("\nInvoking LangGraph Multi-Agent Orchestrator...")
+                result = app.invoke(inputs)
+                final_response = result["messages"][-1].content
+                
+                # Check for Planner Agent state updates
+                new_pending_task = result.get("pending_task_context", "{}")
+                if new_pending_task != pending_task_context:
+                    try:
+                        conn_db = sqlite3.connect(DB_PATH)
+                        cursor = conn_db.cursor()
+                        cursor.execute("UPDATE User SET pendingTaskContext = ? WHERE id = ?", (new_pending_task, user_id))
+                        conn_db.commit()
+                        conn_db.close()
+                    except Exception as e:
+                        print(f"Failed to update pending task context: {e}")
+    
+                # Extract SAVE_TASK payload
+                json_match = re.search(r'\[\[SAVE_TASK_START\]\](.*?)\[\[SAVE_TASK_END\]\]', final_response, re.DOTALL)
+                if json_match:
+                    try:
+                        task_data = json.loads(json_match.group(1).strip())["SAVE_TASK"]
+                        conn_db = sqlite3.connect(DB_PATH)
+                        cursor = conn_db.cursor()
+                        task_id = generate_cuid()
+                        due_date = task_data.get("dueDate", None)
+                        if due_date and (due_date == "YYYY-MM-DDTHH:MM:SSZ" or "YYYY" in due_date): due_date = None
+                            
+                        cursor.execute(
+                            "INSERT INTO Task (id, userId, title, description, priority, dueDate) VALUES (?, ?, ?, ?, ?, ?)",
+                            (task_id, user_id, task_data.get("title", "New Task"), task_data.get("description", ""), task_data.get("priority", "medium"), due_date)
+                        )
+                        cursor.execute("UPDATE User SET pendingTaskContext = '{}' WHERE id = ?", (user_id,))
+                        conn_db.commit()
+                        conn_db.close()
+                        final_response = final_response.replace(json_match.group(0), "").strip()
+                    except Exception as e:
+                        print(f"Error saving task to DB: {e}")
+    
+                # Extract UPDATE_TASK_STATUS
+                update_match = re.search(r'\[\[UPDATE_TASK_STATUS (.*?) (.*?)\]\]', final_response)
+                if update_match:
+                    task_id_to_update, new_status = update_match.group(1).strip(), update_match.group(2).strip()
+                    try:
+                        conn_db = sqlite3.connect(DB_PATH)
+                        cursor = conn_db.cursor()
+                        if new_status == 'completed':
+                            cursor.execute("UPDATE Task SET status = ?, completed = 1 WHERE id = ?", (new_status, task_id_to_update))
+                        else:
+                            cursor.execute("UPDATE Task SET status = ? WHERE id = ?", (new_status, task_id_to_update))
+                        conn_db.commit()
+                        conn_db.close()
+                        final_response = final_response.replace(update_match.group(0), "").strip()
+                    except Exception as e:
+                        print(f"Error updating task status in DB: {e}")
+    
+                # Extract Habit tracking tokens
+                habit_complete_match = re.search(r'\[\[COMPLETE_HABIT_TODAY (.*?)\]\]', final_response)
+                if habit_complete_match:
+                    habit_id = habit_complete_match.group(1).strip()
+                    try:
+                        conn_db = sqlite3.connect(DB_PATH)
+                        cursor = conn_db.cursor()
+                        now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                        cursor.execute("UPDATE HabitExecution SET status = 'completed', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
+                        conn_db.commit()
+                        conn_db.close()
+                        final_response = final_response.replace(habit_complete_match.group(0), "").strip()
+                    except Exception as e:
+                        print(f"Error completing habit: {e}")
+                        
+                habit_delay_match = re.search(r'\[\[DELAY_HABIT (.*?)\]\]', final_response)
+                if habit_delay_match:
+                    habit_id = habit_delay_match.group(1).strip()
+                    try:
+                        conn_db = sqlite3.connect(DB_PATH)
+                        cursor = conn_db.cursor()
+                        now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                        cursor.execute("UPDATE HabitExecution SET reminderStep = 'delayed', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
+                        conn_db.commit()
+                        conn_db.close()
+                        final_response = final_response.replace(habit_delay_match.group(0), "").strip()
+                    except Exception as e:
+                        print(f"Error delaying habit: {e}")
+    
+                habit_fail_match = re.search(r'\[\[FAIL_HABIT_TODAY (.*?)\]\]', final_response)
+                if habit_fail_match:
+                    habit_id = habit_fail_match.group(1).strip()
+                    try:
+                        conn_db = sqlite3.connect(DB_PATH)
+                        cursor = conn_db.cursor()
+                        now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                        cursor.execute("UPDATE HabitExecution SET status = 'failed', reminderStep = 'timeout', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
+                        conn_db.commit()
+                        conn_db.close()
+                        final_response = final_response.replace(habit_fail_match.group(0), "").strip()
+                    except Exception as e:
+                        print(f"Error failing habit: {e}")
+    
+                # Handle Emergency Detection
+                emergency_match = re.search(r'\[\[EMERGENCY_DETECTED\]\]', final_response)
+                if emergency_match:
+                    try:
+                        conn_db = sqlite3.connect(DB_PATH)
+                        cursor = conn_db.cursor()
+                        cursor.execute("SELECT u.emergencyEscalation, e.name, e.email FROM User u LEFT JOIN EmergencyContact e ON u.id = e.userId WHERE u.id = ?", (user_id,))
+                        row = cursor.fetchone()
+                        conn_db.close()
+                        
+                        if row and row[0]:  
+                            contact_name, contact_email = row[1], row[2]
+                            if contact_email:
+                                print(f"🚨 EMERGENCY DETECTED! Escalating to {contact_name} at {contact_email}...")
+                                email_text = f"""SUBJECT: URGENT: Guardian AI Mental Health Alert for {user_name}
+    
+    URGENT MEDICAL/SAFETY ALERT
+    --------------------------------------------------
+    Dear {contact_name},
+    
+    You are receiving this automated alert because you are listed as the emergency contact for {user_name} in their Guardian AI mental health monitoring dashboard.
+    
+    Our AI systems have detected a high-risk scenario in {user_name}'s recent conversational patterns that may indicate a crisis, severe distress, or potential for self-harm.
+    
+    Recent Context Flagged by AI:
+    "{text}"
+    
+    RECOMMENDED ACTIONS:
+    1. Attempt to contact {user_name} immediately.
+    2. If you are unable to reach them and believe they are in immediate danger, please contact local emergency services.
+    3. Treat this situation with urgency and care.
+    
+    This is an automated safety escalation from the Guardian AI platform.
+    --------------------------------------------------"""
+                                if email_connection:
+                                    caspian_client.initiate(
+                                        connection_id=email_connection["id"],
+                                        recipient=contact_email,
+                                        text=email_text
+                                    )
+                                    print(f"✅ Emergency email dispatched to {contact_email} via Caspian.")
+                        final_response = final_response.replace(emergency_match.group(0), "").strip()
+                    except Exception as e:
+                        print(f"Error handling emergency: {e}")
+    
+                bot_msg_id = log_message_to_db(user_id, "ai", final_response)
+                threading.Thread(target=embed_message_sync, args=(bot_msg_id, final_response, user_id, "ai"), daemon=True).start()
+    
+                if hasattr(message, 'reply'): message.reply(final_response)
+                
+            except Exception as e:
+                print(f"Agent Error: {e}")
+                if hasattr(message, 'reply'): message.reply("My internal orchestration encountered an error.")
+    threading.Thread(target=process, daemon=True).start()
 
 
 if __name__ == "__main__":

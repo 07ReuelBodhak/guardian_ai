@@ -29,20 +29,20 @@ export default function HabitClient({ scheduledHabits, executions }: { scheduled
           <CardContent>
             <form action={(formData) => startTransition(() => createHabit(formData))} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-400">Habit Name</label>
-                <input required type="text" name="title" placeholder="e.g., Drink Water" className="w-full p-2 border border-slate-700 bg-transparent text-slate-100 rounded-md outline-none focus:border-indigo-500" />
+                <label className="text-sm font-medium text-slate-500 dark:text-slate-400">Habit Name</label>
+                <input required type="text" name="title" placeholder="e.g., Drink Water" className="w-full p-2 border border-slate-300 dark:border-slate-700 bg-transparent text-slate-900 dark:text-slate-100 rounded-md outline-none focus:border-indigo-500" />
               </div>
               <div className="flex gap-4">
                 <div className="space-y-2 flex-1">
-                  <label className="text-sm font-medium text-slate-400">Time (HH:MM)</label>
-                  <input required type="time" name="time" className="w-full p-2 border border-slate-700 bg-transparent text-slate-100 rounded-md outline-none focus:border-indigo-500" />
+                  <label className="text-sm font-medium text-slate-500 dark:text-slate-400">Time (HH:MM)</label>
+                  <input required type="time" name="time" className="w-full p-2 border border-slate-300 dark:border-slate-700 bg-transparent text-slate-900 dark:text-slate-100 rounded-md outline-none focus:border-indigo-500" />
                 </div>
                 <div className="space-y-2 flex-1">
-                  <label className="text-sm font-medium text-slate-400">Frequency</label>
-                  <select name="frequency" className="w-full p-2 border border-slate-700 rounded-md outline-none focus:border-indigo-500 bg-transparent text-slate-100">
-                    <option className="bg-slate-900" value="daily">Daily</option>
-                    <option className="bg-slate-900" value="weekdays">Weekdays</option>
-                    <option className="bg-slate-900" value="weekends">Weekends</option>
+                  <label className="text-sm font-medium text-slate-500 dark:text-slate-400">Frequency</label>
+                  <select name="frequency" className="w-full p-2 border border-slate-300 dark:border-slate-700 rounded-md outline-none focus:border-indigo-500 bg-transparent text-slate-900 dark:text-slate-100">
+                    <option className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100" value="daily">Daily</option>
+                    <option className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100" value="weekdays">Weekdays</option>
+                    <option className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100" value="weekends">Weekends</option>
                   </select>
                 </div>
               </div>

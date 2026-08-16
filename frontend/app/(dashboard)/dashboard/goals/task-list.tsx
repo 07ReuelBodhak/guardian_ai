@@ -46,7 +46,8 @@ export function TaskList({ initialTasks }: { initialTasks: Task[] }) {
     setEditDesc(task.description || "");
     // Extract YYYY-MM-DD from ISO string for the date input
     if (task.dueDate) {
-      setEditDate(task.dueDate.split("T")[0]);
+      const d = typeof task.dueDate === 'string' ? task.dueDate : new Date(task.dueDate).toISOString();
+      setEditDate(d.split("T")[0]);
     } else {
       setEditDate("");
     }

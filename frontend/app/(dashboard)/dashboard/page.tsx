@@ -21,15 +21,19 @@ export default async function DashboardOverviewPage() {
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
 
-  const tasks = await prisma.task.findMany({
+  // Filter tasks for today in memory to avoid SQLite Date string format mismatches
+  const allTasks = await prisma.task.findMany({
     where: {
       userId: session.user.id,
-      dueDate: {
-        gte: startOfDay,
-        lte: endOfDay
-      }
+      status: 'pending'
     },
     orderBy: { dueDate: 'asc' }
+  });
+
+  const tasks = allTasks.filter(task => {
+    if (!task.dueDate) return false;
+    const taskDate = new Date(task.dueDate);
+    return taskDate >= startOfDay && taskDate <= endOfDay;
   });
 
   // Fetch latest session log (memory)
@@ -55,6 +59,43 @@ export default async function DashboardOverviewPage() {
     }
     return Math.floor(seconds) + " seconds ago";
   };
+
+  const MOOD_SCORES: Record<string, { confidence: number; stress: number; motivation: number }> = {
+    happy: { confidence: 85, stress: 20, motivation: 85 },
+    content: { confidence: 75, stress: 30, motivation: 70 },
+    motivated: { confidence: 90, stress: 40, motivation: 95 },
+    neutral: { confidence: 60, stress: 50, motivation: 60 },
+    anxious: { confidence: 40, stress: 80, motivation: 50 },
+    stressed: { confidence: 50, stress: 85, motivation: 45 },
+    frustrated: { confidence: 45, stress: 75, motivation: 40 },
+    sad: { confidence: 30, stress: 60, motivation: 30 },
+    burnt_out: { confidence: 20, stress: 90, motivation: 15 },
+  };
+
+  const normalizedMood = latestLog?.overallMood?.toLowerCase().replace(/[^a-z_]/g, "") || "neutral";
+  const latestScores = latestLog ? (MOOD_SCORES[normalizedMood] || MOOD_SCORES.neutral) : { confidence: 0, stress: 0, motivation: 0 };
+
+  const firstHabit = await prisma.scheduledHabit.findFirst({
+    where: { userId: session.user.id },
+    orderBy: { time: 'asc' }
+  });
+
+  const sessionLogs = await prisma.sessionLog.findMany({
+    where: { userId: session.user.id },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  let burnoutRisk = 0;
+  if (sessionLogs.length > 0) {
+    burnoutRisk = 20;
+    sessionLogs.forEach(log => {
+      const normalized = log.overallMood?.toLowerCase().replace(/[^a-z_]/g, "") || "neutral";
+      const scores = MOOD_SCORES[normalized] || MOOD_SCORES.neutral;
+      if (scores.stress > 70 && scores.motivation < 40) burnoutRisk = Math.min(100, burnoutRisk + 15);
+      else if (scores.stress < 40 && scores.motivation > 70) burnoutRisk = Math.max(0, burnoutRisk - 15);
+      else burnoutRisk = burnoutRisk > 20 ? burnoutRisk - 5 : (burnoutRisk < 20 ? burnoutRisk + 5 : 20);
+    });
+  }
 
   return (
     <div className="space-y-6 flex-1 flex flex-col min-h-0">
@@ -95,19 +136,37 @@ export default async function DashboardOverviewPage() {
             <Clock className="w-4 h-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-slate-400 text-lg mt-1">No data</div>
-            <p className="text-xs text-[#64748B] mt-1">Schedule a habit to begin</p>
+            {firstHabit ? (
+              <>
+                <div className="text-2xl font-bold mt-1">{firstHabit.time}</div>
+                <p className="text-xs text-[#64748B] mt-1 capitalize">{firstHabit.title}</p>
+              </>
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-slate-400 text-lg mt-1">No data</div>
+                <p className="text-xs text-[#64748B] mt-1">Schedule a habit to begin</p>
+              </>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium">Risk Score</CardTitle>
-            <ShieldAlert className="w-4 h-4 text-slate-400" />
+            <ShieldAlert className={`w-4 h-4 ${sessionLogs.length > 0 ? (burnoutRisk > 60 ? 'text-rose-500' : 'text-emerald-500') : 'text-slate-400'}`} />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-slate-400 text-lg mt-1">Pending</div>
-            <p className="text-xs text-[#64748B] mt-1">Requires more conversations</p>
+            {sessionLogs.length > 0 ? (
+              <>
+                <div className={`text-2xl font-bold mt-1 ${burnoutRisk > 60 ? 'text-rose-500' : 'text-emerald-500'}`}>{burnoutRisk}%</div>
+                <p className="text-xs text-[#64748B] mt-1">Current Burnout Risk</p>
+              </>
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-slate-400 text-lg mt-1">Pending</div>
+                <p className="text-xs text-[#64748B] mt-1">Requires more conversations</p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -168,23 +227,23 @@ export default async function DashboardOverviewPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs mb-1.5 opacity-50">
                   <span className="font-medium">Motivation</span>
-                  <span className="text-[#64748B]">--%</span>
+                  <span className="text-[#64748B]">{latestScores.motivation}%</span>
                 </div>
-                <Progress value={0} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#4F46E5]" />
+                <Progress value={latestScores.motivation} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#4F46E5]" />
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-xs mb-1.5 opacity-50">
                   <span className="font-medium">Confidence</span>
-                  <span className="text-[#64748B]">--%</span>
+                  <span className="text-[#64748B]">{latestScores.confidence}%</span>
                 </div>
-                <Progress value={0} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#8B5CF6]" />
+                <Progress value={latestScores.confidence} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#8B5CF6]" />
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-xs mb-1.5 opacity-50">
                   <span className="font-medium">Stress</span>
-                  <span className="text-[#64748B]">--%</span>
+                  <span className="text-[#64748B]">{latestScores.stress}%</span>
                 </div>
-                <Progress value={0} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#10B981]" />
+                <Progress value={latestScores.stress} className="h-1.5 bg-slate-100 dark:bg-[#1E293B]" indicatorColor="bg-[#10B981]" />
               </div>
             </CardContent>
           </Card>
