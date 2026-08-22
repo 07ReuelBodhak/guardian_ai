@@ -287,7 +287,7 @@ def on_message(message):
                         cursor.execute('UPDATE "User" SET "telegramId" = %s, "telegramConnectCode" = NULL WHERE id = %s', (sender_id, user_id))
                         conn_db.commit()
                         if hasattr(message, 'reply'):
-                            message.reply(f'Successfully connected your {platform.capitalize()} account to AiGuardian!')
+                            message.reply(f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
                         conn_db.close()
                         return
                 else:
@@ -298,7 +298,7 @@ def on_message(message):
                         cursor.execute('UPDATE "User" SET "discordId" = %s, "discordConnectCode" = NULL WHERE id = %s', (sender_id, user_id))
                         conn_db.commit()
                         if hasattr(message, 'reply'):
-                            message.reply(f'Successfully connected your {platform.capitalize()} account to AiGuardian!')
+                            message.reply(f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
                         conn_db.close()
                         return
                 if hasattr(message, 'reply'):
