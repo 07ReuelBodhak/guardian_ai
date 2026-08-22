@@ -56,7 +56,7 @@ def proactive_send(recipient_id, text):
     """Helper to send proactive messages via Caspian SDK."""
     try:
         if hasattr(caspian_client, 'send_message'):
-            caspian_client.send_message(recipient=str(recipient_id), text=text)
+            caspian_client.send_message(conversation_id=str(recipient_id), text=text)
         else:
             print(f'[Caspian Dummy Send] To {recipient_id}: {text}')
     except Exception as e:
@@ -240,7 +240,12 @@ def habit_scheduler_loop():
                 pending_execs = cursor.fetchall()
                 now_utc_dt = datetime.datetime.now(datetime.timezone.utc)
                 for eid, hid, step, last_contact, title in pending_execs:
-                    last_dt = datetime.datetime.strptime(last_contact, '%Y-%m-%d %H:%M:%S').replace(tzinfo=datetime.timezone.utc)
+                    if isinstance(last_contact, datetime.datetime):
+                        last_dt = last_contact
+                    else:
+                        last_dt = datetime.datetime.strptime(last_contact, '%Y-%m-%d %H:%M:%S')
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
                     elapsed_mins = (now_utc_dt - last_dt).total_seconds() / 60.0
                     new_step, new_status, msg_to_send = (None, 'pending', None)
                     if step == 'initial' and elapsed_mins >= 15:
