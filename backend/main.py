@@ -521,4 +521,23 @@ if __name__ == '__main__':
     if telegram_token:
         caspian_client.connect_telegram(telegram_token)
     print('Listening on configured Caspian platforms...')
-    caspian_client.listen()
+    
+import threading
+import uvicorn
+from fastapi import FastAPI
+import os
+
+api_app = FastAPI()
+
+@api_app.get("/")
+def read_root():
+    return {"status": "Alive", "bot": "Guardian AI"}
+
+def run_api():
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(api_app, host="0.0.0.0", port=port)
+
+api_thread = threading.Thread(target=run_api, daemon=True)
+api_thread.start()
+
+caspian_client.listen()
