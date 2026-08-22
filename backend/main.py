@@ -598,5 +598,5 @@ api_thread.start()
 
 
 threading.Thread(target=caspian_client.listen, daemon=True).start()
-discord_client.run(os.getenv("DISCORD_BOT_TOKEN").strip().strip("\"'"))
+discord_client.run(os.getenv("DEV_DISCORD_BOT_TOKEN").strip().strip("\"'"))
 
