@@ -274,6 +274,17 @@ def habit_scheduler_loop():
 @caspian_client.on_message
 def on_message(message):
 
+    def safe_reply(msg, text):
+        try:
+            if hasattr(msg, 'reply'):
+                msg.reply(text)
+        except Exception as e:
+            print(f"[Caspian] Reply failed ({e}). Falling back to proactive send.")
+            try:
+                caspian_client.send_message(conversation_id=getattr(msg, 'conversation_id', ''), text=text)
+            except Exception as e2:
+                print(f"[Caspian] Fallback send failed: {e2}")
+
     def process():
         text = getattr(message, 'text', getattr(message, 'content', '')).strip()
         sender_id = str(getattr(message, 'conversation_id', 'unknown'))
@@ -292,7 +303,7 @@ def on_message(message):
                         cursor.execute('UPDATE "User" SET "telegramId" = %s, "telegramConnectCode" = NULL WHERE id = %s', (sender_id, user_id))
                         conn_db.commit()
                         if hasattr(message, 'reply'):
-                            message.reply(f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
+                            safe_reply(message, f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
                         conn_db.close()
                         return
                 else:
@@ -303,16 +314,16 @@ def on_message(message):
                         cursor.execute('UPDATE "User" SET "discordId" = %s, "discordConnectCode" = NULL WHERE id = %s', (sender_id, user_id))
                         conn_db.commit()
                         if hasattr(message, 'reply'):
-                            message.reply(f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
+                            safe_reply(message, f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
                         conn_db.close()
                         return
                 if hasattr(message, 'reply'):
-                    message.reply('Invalid or expired connect code. Please generate a new one from the dashboard.')
+                    safe_reply(message, 'Invalid or expired connect code. Please generate a new one from the dashboard.')
                 conn_db.close()
             except Exception as e:
                 print(f'Database error: {e}')
                 if hasattr(message, 'reply'):
-                    message.reply('An internal error occurred while trying to connect your account.')
+                    safe_reply(message, 'An internal error occurred while trying to connect your account.')
         else:
             try:
                 user_id = 'unknown_user'
@@ -341,7 +352,7 @@ def on_message(message):
                     print(f'Database lookup error for baseline: {db_e}')
                 if user_id == 'unknown_user':
                     if hasattr(message, 'reply'):
-                        message.reply('Sorry, your account is not linked to Guardian AI! Please go to your dashboard, generate a connect code, and send it here using `!connect <code>`.')
+                        safe_reply(message, 'Sorry, your account is not linked to Guardian AI! Please go to your dashboard, generate a connect code, and send it here using `!connect <code>`.')
                     return
                 text = text.replace('[[', '').replace(']]', '')
                 user_msg_id = log_message_to_db(user_id, 'user', text)
@@ -503,11 +514,11 @@ def on_message(message):
                 bot_msg_id = log_message_to_db(user_id, 'ai', final_response)
                 threading.Thread(target=embed_message_sync, args=(bot_msg_id, final_response, user_id, 'ai'), daemon=True).start()
                 if hasattr(message, 'reply'):
-                    message.reply(final_response)
+                    safe_reply(message, final_response)
             except Exception as e:
                 print(f'Agent Error: {e}')
                 if hasattr(message, 'reply'):
-                    message.reply('My internal orchestration encountered an error.')
+                    safe_reply(message, 'My internal orchestration encountered an error.')
     threading.Thread(target=process, daemon=True).start()
 if __name__ == '__main__':
     print('Starting Caspian Multi-Platform Bot (Discord, Telegram, etc.)...')
