@@ -107,7 +107,7 @@ def analyze_session(uid: str, messages: list):
         now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute('INSERT INTO "SessionLog" (id, "userId", "overallMood", summary, "createdAt") VALUES (%s, %s, %s, %s, %s)', (session_id, uid, overall_mood, summary, now))
         msg_ids = [m[0] for m in messages]
-        placeholders = ','.join(['?'] * len(msg_ids))
+        placeholders = ','.join(['%s'] * len(msg_ids))
         cursor.execute(f'UPDATE "Message" SET processed = TRUE WHERE id IN ({placeholders})', msg_ids)
         conn.commit()
         conn.close()
