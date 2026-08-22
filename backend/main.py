@@ -529,7 +529,7 @@ import os
 
 api_app = FastAPI()
 
-@api_app.get("/")
+@api_app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {"status": "Alive", "bot": "Guardian AI"}
 
