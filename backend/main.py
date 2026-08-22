@@ -1,3 +1,8 @@
+import discord
+import asyncio
+intents = discord.Intents.default()
+intents.message_content = True
+discord_client = discord.Client(intents=intents)
 import os
 import json
 import psycopg2
@@ -52,13 +57,22 @@ def embed_message_sync(msg_id: str, text: str, user_id: str='', role: str='user'
     except Exception as e:
         print(f'[Vector] Error embedding message {msg_id}: {e}')
 
-def proactive_send(recipient_id, text):
-    """Helper to send proactive messages via Caspian SDK."""
+def proactive_send(recipient_id, text, platform='telegram'):
+    """Helper to send proactive messages via Caspian SDK or Discord."""
     try:
-        if hasattr(caspian_client, 'send_message'):
-            caspian_client.send_message(conversation_id=str(recipient_id), text=text)
+        if platform == 'discord':
+            async def send_discord():
+                try:
+                    user = await discord_client.fetch_user(int(recipient_id))
+                    await user.send(text)
+                except Exception as de:
+                    print(f"[Discord] Failed to send to {recipient_id}: {de}")
+            asyncio.run_coroutine_threadsafe(send_discord(), discord_client.loop)
         else:
-            print(f'[Caspian Dummy Send] To {recipient_id}: {text}')
+            if hasattr(caspian_client, 'send_message'):
+                caspian_client.send_message(conversation_id=str(recipient_id), text=text)
+            else:
+                print(f'[Caspian Dummy Send] To {recipient_id}: {text}')
     except Exception as e:
         print(f'Failed to send proactive message to {recipient_id}: {e}')
 
@@ -146,10 +160,13 @@ def proactive_scheduler_loop():
                 uid, name, discord_id, telegram_id, pref_platform, tz_str, last_morning, last_night, persona = user_row
                 if pref_platform == 'telegram' and telegram_id:
                     target_platform_id = telegram_id
+                    plat = 'telegram'
                 elif discord_id:
                     target_platform_id = discord_id
+                    plat = 'discord'
                 else:
                     target_platform_id = telegram_id
+                    plat = 'telegram'
                 if not tz_str:
                     tz_str = 'Asia/Kolkata'
                 try:
@@ -168,7 +185,7 @@ def proactive_scheduler_loop():
                     prompt = f"You are Guardian, a human friend on Discord/Telegram talking to {name or 'User'}. Keep it extremely short (1-2 sentences). Mostly lowercase.\nIt is currently 9:00 AM their time.\nGreet them good morning and remind them they have these tasks pending today:\n{task_str}\nDo NOT sound like an AI. Be casual. Persona: {persona or 'friendly'}"
                     res = analysis_llm.invoke([HumanMessage(content=prompt)])
                     msg_content = res.content.strip()
-                    proactive_send(target_platform_id, msg_content)
+                    proactive_send(target_platform_id, msg_content, platform=plat)
                     cursor.execute('UPDATE "User" SET "lastMorningCheckIn" = %s WHERE id = %s', (today_str, uid))
                     conn.commit()
                 elif current_hour == 21 and last_night != today_str:
@@ -179,7 +196,7 @@ def proactive_scheduler_loop():
                         prompt = f"You are Guardian, a human friend talking to {name or 'User'}. Keep it extremely short (1-2 sentences). Mostly lowercase.\nIt is currently 9:00 PM their time.\nAsk them how their day went and if they managed to get these tasks done today:\n{task_str}\nDo NOT sound like an AI. Be casual. Persona: {persona or 'friendly'}"
                         res = analysis_llm.invoke([HumanMessage(content=prompt)])
                         msg_content = res.content.strip()
-                        proactive_send(target_platform_id, msg_content)
+                        proactive_send(target_platform_id, msg_content, platform=plat)
                         cursor.execute('UPDATE "User" SET "lastNightCheckIn" = %s WHERE id = %s', (today_str, uid))
                         conn.commit()
             conn.close()
@@ -204,10 +221,13 @@ def habit_scheduler_loop():
                 uid, name, discord_id, telegram_id, pref_platform, tz_str, persona = user_row
                 if pref_platform == 'telegram' and telegram_id:
                     target_platform_id = telegram_id
+                    plat = 'telegram'
                 elif discord_id:
                     target_platform_id = discord_id
+                    plat = 'discord'
                 else:
                     target_platform_id = telegram_id
+                    plat = 'telegram'
                 if not tz_str:
                     tz_str = 'Asia/Kolkata'
                 try:
@@ -233,7 +253,7 @@ def habit_scheduler_loop():
                     cursor.execute('INSERT INTO "HabitExecution" (id, "scheduledHabitId", "userId", status, "reminderStep", "lastContactedAt", "dateString", "createdAt") VALUES (%s, %s, %s, \'pending\', \'initial\', %s, %s, %s)', (exec_id, hid, uid, now_utc, today_str, now_utc))
                     prompt = f"You are Guardian, a human friend talking to {name or 'User'}. Keep it extremely short (1 sentence).\nThey scheduled this exact time to do their daily habit: '{title}'.\nSend them a highly contextual, natural reminder to do it right now.\nDo NOT just say 'it's time for your habit called X'. Make it natural. Persona: {persona or 'friendly'}"
                     msg_content = analysis_llm.invoke([HumanMessage(content=prompt)]).content.strip()
-                    proactive_send(target_platform_id, msg_content)
+                    proactive_send(target_platform_id, msg_content, platform=plat)
                     conn.commit()
                     print(f"[Habit] Triggered '{title}' for {name}")
                 cursor.execute('\n                    SELECT e.id, e."scheduledHabitId", e."reminderStep", e."lastContactedAt", h.title \n                    FROM "HabitExecution" e\n                    JOIN "ScheduledHabit" h ON e."scheduledHabitId" = h.id\n                    WHERE e."userId" = %s AND e.status = \'pending\' AND e."dateString" = %s\n                ', (uid, today_str))
@@ -271,24 +291,8 @@ def habit_scheduler_loop():
             print(f'[Habit Scheduler] Error: {e}')
         time.sleep(15)
 
-@caspian_client.on_message
-def on_message(message):
 
-    def safe_reply(msg, text):
-        try:
-            if hasattr(msg, 'reply'):
-                msg.reply(text)
-        except Exception as e:
-            print(f"[Caspian] Reply failed ({e}). Falling back to proactive send.")
-            try:
-                caspian_client.send_message(conversation_id=getattr(msg, 'conversation_id', ''), text=text)
-            except Exception as e2:
-                print(f"[Caspian] Fallback send failed: {e2}")
-
-    def process():
-        text = getattr(message, 'text', getattr(message, 'content', '')).strip()
-        sender_id = str(getattr(message, 'conversation_id', 'unknown'))
-        platform = getattr(message, 'channel', 'unknown')
+def handle_message_logic(platform, sender_id, text, reply_callback):
         print(f'[{platform.upper()}] Received message from {sender_id}: {text}')
         if text.startswith('!connect '):
             code = text.split(' ')[1]
@@ -303,7 +307,7 @@ def on_message(message):
                         cursor.execute('UPDATE "User" SET "telegramId" = %s, "telegramConnectCode" = NULL WHERE id = %s', (sender_id, user_id))
                         conn_db.commit()
                         if hasattr(message, 'reply'):
-                            safe_reply(message, f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
+                            reply_callback(f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
                         conn_db.close()
                         return
                 else:
@@ -314,16 +318,16 @@ def on_message(message):
                         cursor.execute('UPDATE "User" SET "discordId" = %s, "discordConnectCode" = NULL WHERE id = %s', (sender_id, user_id))
                         conn_db.commit()
                         if hasattr(message, 'reply'):
-                            safe_reply(message, f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
+                            reply_callback(f'Successfully connected your {('Discord' if platform == 'unknown' else platform.capitalize())} account to AiGuardian!')
                         conn_db.close()
                         return
                 if hasattr(message, 'reply'):
-                    safe_reply(message, 'Invalid or expired connect code. Please generate a new one from the dashboard.')
+                    reply_callback('Invalid or expired connect code. Please generate a new one from the dashboard.')
                 conn_db.close()
             except Exception as e:
                 print(f'Database error: {e}')
                 if hasattr(message, 'reply'):
-                    safe_reply(message, 'An internal error occurred while trying to connect your account.')
+                    reply_callback('An internal error occurred while trying to connect your account.')
         else:
             try:
                 user_id = 'unknown_user'
@@ -352,7 +356,7 @@ def on_message(message):
                     print(f'Database lookup error for baseline: {db_e}')
                 if user_id == 'unknown_user':
                     if hasattr(message, 'reply'):
-                        safe_reply(message, 'Sorry, your account is not linked to Guardian AI! Please go to your dashboard, generate a connect code, and send it here using `!connect <code>`.')
+                        reply_callback('Sorry, your account is not linked to Guardian AI! Please go to your dashboard, generate a connect code, and send it here using `!connect <code>`.')
                     return
                 text = text.replace('[[', '').replace(']]', '')
                 user_msg_id = log_message_to_db(user_id, 'user', text)
@@ -514,12 +518,47 @@ def on_message(message):
                 bot_msg_id = log_message_to_db(user_id, 'ai', final_response)
                 threading.Thread(target=embed_message_sync, args=(bot_msg_id, final_response, user_id, 'ai'), daemon=True).start()
                 if hasattr(message, 'reply'):
-                    safe_reply(message, final_response)
+                    reply_callback(final_response)
             except Exception as e:
                 print(f'Agent Error: {e}')
                 if hasattr(message, 'reply'):
-                    safe_reply(message, 'My internal orchestration encountered an error.')
-    threading.Thread(target=process, daemon=True).start()
+                    reply_callback('My internal orchestration encountered an error.')
+
+
+@caspian_client.on_message
+def on_message(message):
+    text = getattr(message, 'text', getattr(message, 'content', '')).strip()
+    sender_id = str(getattr(message, 'conversation_id', 'unknown'))
+    platform = getattr(message, 'channel', 'unknown')
+    
+    if platform == "discord":
+        return # Discord is handled natively now
+        
+    def safe_reply(text):
+        try:
+            if hasattr(message, 'reply'):
+                message.reply(text)
+        except Exception as e:
+            print(f"[Caspian] Reply failed ({e}). Falling back to proactive send.")
+            try:
+                caspian_client.send_message(conversation_id=getattr(message, 'conversation_id', ''), text=text)
+            except Exception as e2:
+                print(f"[Caspian] Fallback send failed: {e2}")
+                
+    threading.Thread(target=handle_message_logic, args=(platform, sender_id, text, safe_reply), daemon=True).start()
+
+@discord_client.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    text = message.content.strip()
+    sender_id = str(message.author.id)
+    
+    def discord_reply(text):
+        asyncio.run_coroutine_threadsafe(message.reply(text), discord_client.loop)
+        
+    threading.Thread(target=handle_message_logic, args=('discord', sender_id, text, discord_reply), daemon=True).start()
+
 if __name__ == '__main__':
     print('Starting Caspian Multi-Platform Bot (Discord, Telegram, etc.)...')
     threading.Thread(target=memory_scan_loop, daemon=True).start()
@@ -543,6 +582,7 @@ import uvicorn
 from fastapi import FastAPI
 import os
 
+
 api_app = FastAPI()
 
 @api_app.api_route("/", methods=["GET", "HEAD"])
@@ -556,4 +596,7 @@ def run_api():
 api_thread = threading.Thread(target=run_api, daemon=True)
 api_thread.start()
 
-caspian_client.listen()
+
+threading.Thread(target=caspian_client.listen, daemon=True).start()
+discord_client.run(os.getenv("DISCORD_BOT_TOKEN"))
+
