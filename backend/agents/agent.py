@@ -18,7 +18,7 @@ except ImportError:
     import pytz as ZoneInfo
 
 groq_model = ChatGroq(
-    model="llama3-8b-8192",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY")
 )
 
