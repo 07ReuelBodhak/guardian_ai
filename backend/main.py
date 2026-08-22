@@ -572,7 +572,7 @@ if __name__ == '__main__':
     discord_token = os.getenv('DISCORD_BOT_TOKEN')
     telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
     if discord_token:
-        caspian_client.connect_discord(discord_token)
+        pass # Removed caspian discord connection
     if telegram_token:
         caspian_client.connect_telegram(telegram_token)
     print('Listening on configured Caspian platforms...')
@@ -598,5 +598,5 @@ api_thread.start()
 
 
 threading.Thread(target=caspian_client.listen, daemon=True).start()
-discord_client.run(os.getenv("DISCORD_BOT_TOKEN"))
+discord_client.run(os.getenv("DISCORD_BOT_TOKEN").strip("\"'"))
 
