@@ -23,7 +23,7 @@ load_dotenv()
 POSTGRES_URL = os.getenv('DATABASE_URL')
 SILENCE_THRESHOLD_MINUTES = 1
 analysis_llm = ChatGroq(model='openai/gpt-oss-120b', api_key=os.getenv('GROQ_API_KEY'))
-ANALYSIS_PROMPT = 'You are an emotional intelligence analyst for a mental health companion app.\n\nGiven the following conversation transcript between a user and an AI companion, analyze the user\'s messages and produce a JSON object with exactly these three keys:\n\n1. "overallMood" - A single adjective describing the user\'s emotional state across the ENTIRE session (e.g., "happy", "anxious", "stressed", "neutral", "sad", "motivated", "frustrated", "content"). Base this on the full context, not any single message.\n\n2. "baseline" - A JSON object capturing the user\'s texting style with these exact keys:\n   - "averageLength": average character count per user message (number)\n   - "punctuationRatio": fraction of user messages containing periods, exclamation marks, or question marks (0.0 to 1.0)\n   - "emojiRatio": fraction of user messages containing emojis (0.0 to 1.0)\n   - "capitalStartRatio": fraction of user messages that start with a capital letter (0.0 to 1.0)\n   - "sentimentScore": overall sentiment from -1.0 (very negative) to 1.0 (very positive)\n   - "topWords": array of the 3 most frequently used non-stopwords by the user\n   - "typingStyle": one of "lowercase", "sentence-case", "uppercase", "mixed-case"\n   - "messagesPerMinute": estimated messages per minute based on message count and session duration\n\n3. "summary" - A single sentence summarizing the session (e.g., "User vented about work stress and felt better after discussing coping strategies.")\n\nIMPORTANT: Return ONLY the raw JSON object. No markdown, no code fences, no explanation.\n\nTranscript:\n{transcript}'
+ANALYSIS_PROMPT = 'You are an emotional intelligence analyst for a mental health companion app.\n\nGiven the following conversation transcript between a user and an AI companion, analyze the user\'s messages and produce a JSON object with exactly these three keys:\n\n1. ""overallMood"" - A single adjective describing the user\'s emotional state across the ENTIRE session (e.g., "happy", "anxious", "stressed", "neutral", "sad", "motivated", "frustrated", "content"). Base this on the full context, not any single message.\n\n2. "baseline" - A JSON object capturing the user\'s texting style with these exact keys:\n   - "averageLength": average character count per user message (number)\n   - "punctuationRatio": fraction of user messages containing periods, exclamation marks, or question marks (0.0 to 1.0)\n   - "emojiRatio": fraction of user messages containing emojis (0.0 to 1.0)\n   - "capitalStartRatio": fraction of user messages that start with a capital letter (0.0 to 1.0)\n   - "sentimentScore": overall sentiment from -1.0 (very negative) to 1.0 (very positive)\n   - "topWords": array of the 3 most frequently used non-stopwords by the user\n   - "typingStyle": one of "lowercase", "sentence-case", "uppercase", "mixed-case"\n   - "messagesPerMinute": estimated messages per minute based on message count and session duration\n\n3. "summary" - A single sentence summarizing the session (e.g., "User vented about work stress and felt better after discussing coping strategies.")\n\nIMPORTANT: Return ONLY the raw JSON object. No markdown, no code fences, no explanation.\n\nTranscript:\n{transcript}'
 
 def generate_cuid():
     """Generate a simple unique ID for SQLite rows."""
@@ -97,7 +97,7 @@ def analyze_session(uid: str, messages: list):
                 raw_content = raw_content[:-3]
             raw_content = raw_content.strip()
         data = json.loads(raw_content)
-        overall_mood = data.get('overallMood', 'neutral')
+        overall_mood = data.get('"overallMood"', 'neutral')
         baseline = data.get('baseline', {})
         summary = data.get('summary', 'Session analyzed.')
         conn = psycopg2.connect(POSTGRES_URL)
@@ -105,7 +105,7 @@ def analyze_session(uid: str, messages: list):
         cursor.execute('UPDATE "User" SET "textingBaseline" = %s WHERE id = %s', (json.dumps(baseline), uid))
         session_id = generate_cuid()
         now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-        cursor.execute('INSERT INTO "SessionLog" (id, "userId", overallMood, summary, "createdAt") VALUES (%s, %s, %s, %s, %s)', (session_id, uid, overall_mood, summary, now))
+        cursor.execute('INSERT INTO "SessionLog" (id, "userId", "overallMood", summary, "createdAt") VALUES (%s, %s, %s, %s, %s)', (session_id, uid, overall_mood, summary, now))
         msg_ids = [m[0] for m in messages]
         placeholders = ','.join(['?'] * len(msg_ids))
         cursor.execute(f'UPDATE "Message" SET processed = TRUE WHERE id IN ({placeholders})', msg_ids)
