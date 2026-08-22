@@ -97,7 +97,7 @@ def analyze_session(uid: str, messages: list):
                 raw_content = raw_content[:-3]
             raw_content = raw_content.strip()
         data = json.loads(raw_content)
-        overall_mood = data.get('"overallMood"', 'neutral')
+        overall_mood = data.get('overallMood', 'neutral')
         baseline = data.get('baseline', {})
         summary = data.get('summary', 'Session analyzed.')
         conn = psycopg2.connect(POSTGRES_URL)
