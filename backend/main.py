@@ -269,15 +269,15 @@ def habit_scheduler_loop():
             conn.close()
         except Exception as e:
             print(f'[Habit Scheduler] Error: {e}')
-        time.sleep(60)
+        time.sleep(15)
 
 @caspian_client.on_message
 def on_message(message):
 
     def process():
         text = getattr(message, 'text', getattr(message, 'content', '')).strip()
-        sender_id = str(getattr(message, 'sender_id', getattr(message, 'author_id', 'unknown')))
-        platform = getattr(message, 'platform', 'unknown')
+        sender_id = str(getattr(message, 'conversation_id', 'unknown'))
+        platform = getattr(message, 'channel', 'unknown')
         print(f'[{platform.upper()}] Received message from {sender_id}: {text}')
         if text.startswith('!connect '):
             code = text.split(' ')[1]
