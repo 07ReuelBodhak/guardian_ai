@@ -1,22 +1,18 @@
-"""
+﻿"""
 ChromaDB Vector Store wrapper for Guardian AI.
 
-Uses ChromaDB's built-in embedding model (onnxruntime-based all-MiniLM-L6-v2).
-No external API calls needed for embeddings — runs 100% locally.
-
+Uses Cohere's Embedding API to keep local memory usage low.
 The collection is persisted to `backend/vector_store/chroma_db/` so it
 survives restarts.
-
-Usage:
-    from vector_store import upsert, query
-
-    upsert("msg_abc123", "I'm feeling great today!", user_id="user123", role="user")
-    results = query("happy and energetic", user_id="user123", k=5)
 """
 
 import os
 from pathlib import Path
 import chromadb
+import chromadb.utils.embedding_functions as embedding_functions
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Persistent storage directory
 CHROMA_DIR = str(Path(__file__).parent / "chroma_db")
@@ -25,7 +21,6 @@ CHROMA_DIR = str(Path(__file__).parent / "chroma_db")
 _client = None
 _collection = None
 
-
 def _get_collection():
     """Lazy-load the ChromaDB client and collection."""
     global _client, _collection
@@ -33,24 +28,28 @@ def _get_collection():
         return _collection
 
     _client = chromadb.PersistentClient(path=CHROMA_DIR)
+    
+    # Use Cohere to avoid loading massive ONNX models into RAM
+    cohere_ef = embedding_functions.CohereEmbeddingFunction(
+        api_key=os.getenv("COHERE_API_KEY", ""),
+        model_name="embed-english-v3.0"
+    )
+
     _collection = _client.get_or_create_collection(
-        name="guardian_messages",
-        metadata={"hnsw:space": "cosine"}  # cosine similarity
+        name="guardian_messages_cohere",
+        embedding_function=cohere_ef,
+        metadata={"hnsw:space": "cosine"}
     )
     return _collection
 
 
 def upsert(message_id: str, text: str, user_id: str = "", role: str = "user"):
-    """
-    Embed a message and store it in ChromaDB.
-
-    Args:
-        message_id: The SQLite Message.id (cuid) for this message.
-        text: The raw message text to embed.
-        user_id: The user's ID (for metadata filtering).
-        role: "user" or "ai".
-    """
     collection = _get_collection()
+    
+    # Cohere requires a valid API key. If it's missing, gracefully fail instead of crashing.
+    if not os.getenv("COHERE_API_KEY"):
+        print("[VectorStore] Warning: COHERE_API_KEY not found. Skipping upsert.")
+        return
 
     collection.upsert(
         ids=[message_id],
@@ -63,38 +62,25 @@ def upsert(message_id: str, text: str, user_id: str = "", role: str = "user"):
 
 
 def query(query_text: str, user_id: str = None, k: int = 5) -> list[dict]:
-    """
-    Find the k most similar messages to query_text.
-
-    Args:
-        query_text: The text to search for.
-        user_id: Optional — filter results to this user only.
-        k: Number of nearest neighbors to return.
-
-    Returns:
-        A list of dicts: [{"id": str, "text": str, "user_id": str, "role": str, "distance": float}, ...]
-    """
     collection = _get_collection()
 
-    if collection.count() == 0:
+    if not os.getenv("COHERE_API_KEY") or collection.count() == 0:
         return []
 
-    # Clamp k to available docs
     actual_k = min(k, collection.count())
+    if actual_k == 0:
+        return []
 
-    # Build the query kwargs
     query_kwargs = {
         "query_texts": [query_text],
         "n_results": actual_k
     }
 
-    # Filter by user_id if provided
     if user_id:
         query_kwargs["where"] = {"user_id": user_id}
 
     results = collection.query(**query_kwargs)
 
-    # Format the results into a clean list
     output = []
     if results and results["ids"] and results["ids"][0]:
         for i, msg_id in enumerate(results["ids"][0]):
