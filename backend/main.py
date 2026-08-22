@@ -1,6 +1,8 @@
 import os
 import json
-import sqlite3
+import psycopg2
+import psycopg2.extras
+import os
 import datetime
 import threading
 import time
@@ -25,7 +27,7 @@ except Exception as e:
 
 load_dotenv()
 
-DB_PATH = "../frontend/prisma/dev.db"
+POSTGRES_URL = os.getenv('DATABASE_URL')
 
 # ── Memory Agent configuration ────────────────────────────────────────────────
 
@@ -72,10 +74,10 @@ def log_message_to_db(user_id: str, role: str, text: str) -> str:
     msg_id = generate_cuid()
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        conn = psycopg2.connect(POSTGRES_URL)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cursor.execute(
-            "INSERT INTO Message (id, userId, role, text, createdAt, processed) VALUES (?, ?, ?, ?, ?, 0)",
+            "INSERT INTO \"Message\" (id, userId, role, text, createdAt, processed) VALUES (%s, %s, %s, %s, %s, FALSE)",
             (msg_id, user_id, role, text, now)
         )
         conn.commit()
@@ -108,8 +110,8 @@ def proactive_send(recipient_id, text):
 
 def fetch_silent_sessions():
     """Find all users who have unprocessed messages and whose latest message is older than SILENCE_THRESHOLD_MINUTES."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    conn = psycopg2.connect(POSTGRES_URL)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     threshold = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=SILENCE_THRESHOLD_MINUTES)
     threshold_str = threshold.strftime("%Y-%m-%d %H:%M:%S")
@@ -169,21 +171,21 @@ def analyze_session(uid: str, messages: list):
         baseline = data.get("baseline", {})
         summary = data.get("summary", "Session analyzed.")
 
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        conn = psycopg2.connect(POSTGRES_URL)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        cursor.execute("UPDATE User SET textingBaseline = ? WHERE id = ?", (json.dumps(baseline), uid))
+        cursor.execute("UPDATE \"User\" SET textingBaseline = %s WHERE id = %s", (json.dumps(baseline), uid))
 
         session_id = generate_cuid()
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT INTO SessionLog (id, userId, overallMood, summary, createdAt) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO \"SessionLog\" (id, userId, overallMood, summary, createdAt) VALUES (%s, %s, %s, %s, %s)",
             (session_id, uid, overall_mood, summary, now)
         )
 
         msg_ids = [m[0] for m in messages]
         placeholders = ",".join(["?"] * len(msg_ids))
-        cursor.execute(f"UPDATE Message SET processed = 1 WHERE id IN ({placeholders})", msg_ids)
+        cursor.execute(f"UPDATE \"Message\" SET processed = TRUE WHERE id IN ({placeholders})", msg_ids)
 
         conn.commit()
         conn.close()
@@ -219,11 +221,11 @@ def proactive_scheduler_loop():
             except ImportError:
                 import pytz as ZoneInfo
 
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
+            conn = psycopg2.connect(POSTGRES_URL)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
             
             # Get all users connected via Caspian platforms
-            cursor.execute("SELECT id, name, discordId, telegramId, preferredPlatform, timezone, lastMorningCheckIn, lastNightCheckIn, motivation FROM User WHERE discordId IS NOT NULL OR telegramId IS NOT NULL")
+            cursor.execute("SELECT id, name, discordId, telegramId, preferredPlatform, timezone, lastMorningCheckIn, lastNightCheckIn, motivation FROM \"User\" WHERE discordId IS NOT NULL OR telegramId IS NOT NULL")
             users = cursor.fetchall()
             
             for user_row in users:
@@ -246,7 +248,7 @@ def proactive_scheduler_loop():
                 
                 # Morning Check-in (between 8:00 and 8:59 AM)
                 if current_hour == 8 and last_morning != today_str:
-                    cursor.execute("SELECT title, dueDate FROM Task WHERE userId = ? AND status != 'completed' ORDER BY dueDate ASC LIMIT 5", (uid,))
+                    cursor.execute("SELECT title, dueDate FROM \"Task\" WHERE userId = %s AND status != 'completed' ORDER BY dueDate ASC LIMIT 5", (uid,))
                     tasks_rows = cursor.fetchall()
                     task_str = "No tasks for today!"
                     if tasks_rows:
@@ -263,12 +265,12 @@ def proactive_scheduler_loop():
                     msg_content = res.content.strip()
                     proactive_send(target_platform_id, msg_content)
                         
-                    cursor.execute("UPDATE User SET lastMorningCheckIn = ? WHERE id = ?", (today_str, uid))
+                    cursor.execute("UPDATE \"User\" SET lastMorningCheckIn = %s WHERE id = %s", (today_str, uid))
                     conn.commit()
                     
                 # Night Check-in (between 9:00 and 9:59 PM)
                 elif current_hour == 21 and last_night != today_str:
-                    cursor.execute("SELECT title, status FROM Task WHERE userId = ? AND status != 'completed' ORDER BY dueDate ASC LIMIT 5", (uid,))
+                    cursor.execute("SELECT title, status FROM \"Task\" WHERE userId = %s AND status != 'completed' ORDER BY dueDate ASC LIMIT 5", (uid,))
                     tasks_rows = cursor.fetchall()
                     task_str = "\n".join([f"- {t[0]} [Current Status: {t[1]}]" for t in tasks_rows]) if tasks_rows else "No pending tasks."
                     
@@ -284,7 +286,7 @@ def proactive_scheduler_loop():
                         msg_content = res.content.strip()
                         proactive_send(target_platform_id, msg_content)
                             
-                        cursor.execute("UPDATE User SET lastNightCheckIn = ? WHERE id = ?", (today_str, uid))
+                        cursor.execute("UPDATE \"User\" SET lastNightCheckIn = %s WHERE id = %s", (today_str, uid))
                         conn.commit()
             conn.close()
         except Exception as e:
@@ -302,10 +304,10 @@ def habit_scheduler_loop():
             except ImportError:
                 import pytz as ZoneInfo
 
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
+            conn = psycopg2.connect(POSTGRES_URL)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
             
-            cursor.execute("SELECT id, name, discordId, telegramId, preferredPlatform, timezone, motivation FROM User WHERE discordId IS NOT NULL OR telegramId IS NOT NULL")
+            cursor.execute("SELECT id, name, discordId, telegramId, preferredPlatform, timezone, motivation FROM \"User\" WHERE discordId IS NOT NULL OR telegramId IS NOT NULL")
             users = cursor.fetchall()
             
             for user_row in users:
@@ -328,20 +330,20 @@ def habit_scheduler_loop():
                 weekday = now_local.weekday()
                 
                 # --- 1. Trigger Initial Habits ---
-                cursor.execute("SELECT id, title, frequency FROM ScheduledHabit WHERE userId = ? AND time = ?", (uid, time_str))
+                cursor.execute("SELECT id, title, frequency FROM \"ScheduledHabit\" WHERE userId = %s AND time = %s", (uid, time_str))
                 habits = cursor.fetchall()
                 
                 for hid, title, freq in habits:
                     if freq == "weekdays" and weekday > 4: continue
                     if freq == "weekends" and weekday < 5: continue
                     
-                    cursor.execute("SELECT id FROM HabitExecution WHERE scheduledHabitId = ? AND dateString = ?", (hid, today_str))
+                    cursor.execute("SELECT id FROM \"HabitExecution\" WHERE scheduledHabitId = %s AND dateString = %s", (hid, today_str))
                     if cursor.fetchone(): continue
                     
                     exec_id = generate_cuid()
                     now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                     cursor.execute(
-                        "INSERT INTO HabitExecution (id, scheduledHabitId, userId, status, reminderStep, lastContactedAt, dateString, createdAt) VALUES (?, ?, ?, 'pending', 'initial', ?, ?, ?)",
+                        "INSERT INTO \"HabitExecution\" (id, scheduledHabitId, userId, status, reminderStep, lastContactedAt, dateString, createdAt) VALUES (%s, %s, %s, 'pending', 'initial', %s, %s, %s)",
                         (exec_id, hid, uid, now_utc, today_str, now_utc)
                     )
                     
@@ -389,7 +391,7 @@ def habit_scheduler_loop():
                     
                     if new_step:
                         now_utc_str = now_utc_dt.strftime("%Y-%m-%d %H:%M:%S")
-                        cursor.execute("UPDATE HabitExecution SET reminderStep = ?, status = ?, lastContactedAt = ? WHERE id = ?", (new_step, new_status, now_utc_str, eid))
+                        cursor.execute("UPDATE \"HabitExecution\" SET reminderStep = %s, status = %s, lastContactedAt = %s WHERE id = %s", (new_step, new_status, now_utc_str, eid))
                         conn.commit()
                         if msg_to_send:
                             proactive_send(target_platform_id, msg_to_send)
@@ -414,15 +416,15 @@ def on_message(message):
         if text.startswith("!connect "):
             code = text.split(" ")[1]
             try:
-                conn_db = sqlite3.connect(DB_PATH)
-                cursor = conn_db.cursor()
+                conn_db = psycopg2.connect(POSTGRES_URL)
+                cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
                 if platform == 'telegram':
-                    cursor.execute("SELECT id FROM User WHERE telegramConnectCode = ?", (code,))
+                    cursor.execute("SELECT id FROM \"User\" WHERE telegramConnectCode = %s", (code,))
                     row = cursor.fetchone()
                     if row:
                         user_id = row[0]
                         cursor.execute(
-                            "UPDATE User SET telegramId = ?, telegramConnectCode = NULL WHERE id = ?",
+                            "UPDATE \"User\" SET telegramId = %s, telegramConnectCode = NULL WHERE id = %s",
                             (sender_id, user_id)
                         )
                         conn_db.commit()
@@ -430,12 +432,12 @@ def on_message(message):
                         conn_db.close()
                         return
                 else:
-                    cursor.execute("SELECT id FROM User WHERE discordConnectCode = ?", (code,))
+                    cursor.execute("SELECT id FROM \"User\" WHERE discordConnectCode = %s", (code,))
                     row = cursor.fetchone()
                     if row:
                         user_id = row[0]
                         cursor.execute(
-                            "UPDATE User SET discordId = ?, discordConnectCode = NULL WHERE id = ?",
+                            "UPDATE \"User\" SET discordId = %s, discordConnectCode = NULL WHERE id = %s",
                             (sender_id, user_id)
                         )
                         conn_db.commit()
@@ -459,16 +461,16 @@ def on_message(message):
                 user_timezone = "Asia/Kolkata"
                 
                 try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
+                    conn_db = psycopg2.connect(POSTGRES_URL)
+                    cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
                     if platform == 'telegram':
                         cursor.execute(
-                            "SELECT id, textingBaseline, name, motivation, pendingTaskContext, timezone FROM User WHERE telegramId = ?", 
+                            "SELECT id, textingBaseline, name, motivation, pendingTaskContext, timezone FROM \"User\" WHERE telegramId = %s", 
                             (sender_id,)
                         )
                     else:
                         cursor.execute(
-                            "SELECT id, textingBaseline, name, motivation, pendingTaskContext, timezone FROM User WHERE discordId = ?", 
+                            "SELECT id, textingBaseline, name, motivation, pendingTaskContext, timezone FROM \"User\" WHERE discordId = %s", 
                             (sender_id,)
                         )
                     row = cursor.fetchone()
@@ -495,9 +497,9 @@ def on_message(message):
                     
                 history_messages = []
                 try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    cursor.execute("SELECT role, text FROM Message WHERE userId = ? ORDER BY createdAt DESC LIMIT 10", (user_id,))
+                    conn_db = psycopg2.connect(POSTGRES_URL)
+                    cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                    cursor.execute("SELECT role, text FROM \"Message\" WHERE userId = %s ORDER BY createdAt DESC LIMIT 10", (user_id,))
                     rows = cursor.fetchall()
                     conn_db.close()
                     for r, t in rows[::-1]:
@@ -525,12 +527,12 @@ def on_message(message):
                 # ── Fetch active tasks ──
                 active_tasks_str, pending_habits_str = "No active tasks.", "No pending habits."
                 try:
-                    conn_db = sqlite3.connect(DB_PATH)
-                    cursor = conn_db.cursor()
-                    cursor.execute("SELECT COUNT(*) FROM Task WHERE userId = ?", (user_id,))
+                    conn_db = psycopg2.connect(POSTGRES_URL)
+                    cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                    cursor.execute("SELECT COUNT(*) FROM \"Task\" WHERE userId = %s", (user_id,))
                     total_tasks = cursor.fetchone()[0]
                     
-                    cursor.execute("SELECT id, title, dueDate, status FROM Task WHERE userId = ? AND status != 'completed' ORDER BY dueDate ASC, createdAt DESC LIMIT 5", (user_id,))
+                    cursor.execute("SELECT id, title, dueDate, status FROM \"Task\" WHERE userId = %s AND status != 'completed' ORDER BY dueDate ASC, createdAt DESC LIMIT 5", (user_id,))
                     tasks_rows = cursor.fetchall()
                     if tasks_rows:
                         lines = [f"- [ID: {t[0]}] {t[1]} (Due: {t[2] or 'No date'}) [Status: {t[3]}]" for t in tasks_rows]
@@ -538,7 +540,7 @@ def on_message(message):
                         active_tasks_str = "\n".join(lines)
                     
                     today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-                    cursor.execute('''SELECT e.id, h.title, e.reminderStep FROM HabitExecution e JOIN ScheduledHabit h ON e.scheduledHabitId = h.id WHERE e.userId = ? AND e.status = 'pending' AND e.dateString = ?''', (user_id, today_str))
+                    cursor.execute('''SELECT e.id, h.title, e.reminderStep FROM \"HabitExecution\" e JOIN \"ScheduledHabit\" h ON e.scheduledHabitId = h.id WHERE e.userId = %s AND e.status = 'pending' AND e.dateString = %s''', (user_id, today_str))
                     habit_rows = cursor.fetchall()
                     conn_db.close()
                     if habit_rows:
@@ -567,9 +569,9 @@ def on_message(message):
                 new_pending_task = result.get("pending_task_context", "{}")
                 if new_pending_task != pending_task_context:
                     try:
-                        conn_db = sqlite3.connect(DB_PATH)
-                        cursor = conn_db.cursor()
-                        cursor.execute("UPDATE User SET pendingTaskContext = ? WHERE id = ?", (new_pending_task, user_id))
+                        conn_db = psycopg2.connect(POSTGRES_URL)
+                        cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                        cursor.execute("UPDATE \"User\" SET pendingTaskContext = %s WHERE id = %s", (new_pending_task, user_id))
                         conn_db.commit()
                         conn_db.close()
                     except Exception as e:
@@ -580,17 +582,17 @@ def on_message(message):
                 if json_match:
                     try:
                         task_data = json.loads(json_match.group(1).strip())["SAVE_TASK"]
-                        conn_db = sqlite3.connect(DB_PATH)
-                        cursor = conn_db.cursor()
+                        conn_db = psycopg2.connect(POSTGRES_URL)
+                        cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
                         task_id = generate_cuid()
                         due_date = task_data.get("dueDate", None)
                         if due_date and (due_date == "YYYY-MM-DDTHH:MM:SSZ" or "YYYY" in due_date): due_date = None
                             
                         cursor.execute(
-                            "INSERT INTO Task (id, userId, title, description, priority, dueDate) VALUES (?, ?, ?, ?, ?, ?)",
+                            "INSERT INTO \"Task\" (id, userId, title, description, priority, dueDate) VALUES (%s, %s, %s, %s, %s, %s)",
                             (task_id, user_id, task_data.get("title", "New Task"), task_data.get("description", ""), task_data.get("priority", "medium"), due_date)
                         )
-                        cursor.execute("UPDATE User SET pendingTaskContext = '{}' WHERE id = ?", (user_id,))
+                        cursor.execute("UPDATE \"User\" SET pendingTaskContext = '{}' WHERE id = %s", (user_id,))
                         conn_db.commit()
                         conn_db.close()
                         final_response = final_response.replace(json_match.group(0), "").strip()
@@ -602,12 +604,12 @@ def on_message(message):
                 if update_match:
                     task_id_to_update, new_status = update_match.group(1).strip(), update_match.group(2).strip()
                     try:
-                        conn_db = sqlite3.connect(DB_PATH)
-                        cursor = conn_db.cursor()
+                        conn_db = psycopg2.connect(POSTGRES_URL)
+                        cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
                         if new_status == 'completed':
-                            cursor.execute("UPDATE Task SET status = ?, completed = 1 WHERE id = ?", (new_status, task_id_to_update))
+                            cursor.execute("UPDATE \"Task\" SET status = %s, completed = TRUE WHERE id = %s", (new_status, task_id_to_update))
                         else:
-                            cursor.execute("UPDATE Task SET status = ? WHERE id = ?", (new_status, task_id_to_update))
+                            cursor.execute("UPDATE \"Task\" SET status = %s WHERE id = %s", (new_status, task_id_to_update))
                         conn_db.commit()
                         conn_db.close()
                         final_response = final_response.replace(update_match.group(0), "").strip()
@@ -619,10 +621,10 @@ def on_message(message):
                 if habit_complete_match:
                     habit_id = habit_complete_match.group(1).strip()
                     try:
-                        conn_db = sqlite3.connect(DB_PATH)
-                        cursor = conn_db.cursor()
+                        conn_db = psycopg2.connect(POSTGRES_URL)
+                        cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
                         now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                        cursor.execute("UPDATE HabitExecution SET status = 'completed', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
+                        cursor.execute("UPDATE \"HabitExecution\" SET status = 'completed', lastContactedAt = %s WHERE id = %s", (now_utc, habit_id))
                         conn_db.commit()
                         conn_db.close()
                         final_response = final_response.replace(habit_complete_match.group(0), "").strip()
@@ -633,10 +635,10 @@ def on_message(message):
                 if habit_delay_match:
                     habit_id = habit_delay_match.group(1).strip()
                     try:
-                        conn_db = sqlite3.connect(DB_PATH)
-                        cursor = conn_db.cursor()
+                        conn_db = psycopg2.connect(POSTGRES_URL)
+                        cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
                         now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                        cursor.execute("UPDATE HabitExecution SET reminderStep = 'delayed', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
+                        cursor.execute("UPDATE \"HabitExecution\" SET reminderStep = 'delayed', lastContactedAt = %s WHERE id = %s", (now_utc, habit_id))
                         conn_db.commit()
                         conn_db.close()
                         final_response = final_response.replace(habit_delay_match.group(0), "").strip()
@@ -647,10 +649,10 @@ def on_message(message):
                 if habit_fail_match:
                     habit_id = habit_fail_match.group(1).strip()
                     try:
-                        conn_db = sqlite3.connect(DB_PATH)
-                        cursor = conn_db.cursor()
+                        conn_db = psycopg2.connect(POSTGRES_URL)
+                        cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
                         now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                        cursor.execute("UPDATE HabitExecution SET status = 'failed', reminderStep = 'timeout', lastContactedAt = ? WHERE id = ?", (now_utc, habit_id))
+                        cursor.execute("UPDATE \"HabitExecution\" SET status = 'failed', reminderStep = 'timeout', lastContactedAt = %s WHERE id = %s", (now_utc, habit_id))
                         conn_db.commit()
                         conn_db.close()
                         final_response = final_response.replace(habit_fail_match.group(0), "").strip()
@@ -661,9 +663,9 @@ def on_message(message):
                 emergency_match = re.search(r'\[\[EMERGENCY_DETECTED\]\]', final_response)
                 if emergency_match:
                     try:
-                        conn_db = sqlite3.connect(DB_PATH)
-                        cursor = conn_db.cursor()
-                        cursor.execute("SELECT u.emergencyEscalation, e.name, e.email FROM User u LEFT JOIN EmergencyContact e ON u.id = e.userId WHERE u.id = ?", (user_id,))
+                        conn_db = psycopg2.connect(POSTGRES_URL)
+                        cursor = conn_db.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                        cursor.execute("SELECT u.emergencyEscalation, e.name, e.email FROM \"User\" u LEFT JOIN \"EmergencyContact\" e ON u.id = e.userId WHERE u.id = %s", (user_id,))
                         row = cursor.fetchone()
                         conn_db.close()
                         
