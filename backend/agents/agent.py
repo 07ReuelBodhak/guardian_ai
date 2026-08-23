@@ -176,7 +176,7 @@ def conversation_node(state: AgentState):
         "- EMERGENCY PROTOCOL: If the user explicitly states they are in severe crisis, danger, extremely depressed, panicking, or mentions self-harm, you MUST append this exact token at the end of your response: [[EMERGENCY_DETECTED]]\n"
         "- If the user explicitly mentions they completed a task, failed a task, or will do it later (from their Active Dashboard Tasks), you MUST append this token at the very end of your response: [[UPDATE_TASK_STATUS TaskID completed/incomplete]]\n"
         "- If the user is replying to a Habit Reminder (from their Pending Scheduled Habits):\n"
-        "  - If they did it, or say they are currently doing it, append: [[COMPLETE_HABIT_TODAY HabitID]]\n"
+        "  - If they did it, say they are doing it, or just say 'yes/yup/done' to the reminder, append EXACTLY: [[COMPLETE_HABIT_TODAY HabitID]] (DO NOT FORGET THIS)\n"
         "  - If they say 'no' to an 'initial' or 'delayed' step reminder, playfully motivate them in character and append: [[DELAY_HABIT HabitID]]\n"
         "  - If they say 'no' to a 'followup1' step reminder, say 'okay I understand', give a short motivational message about the importance of consistency for next time, and append: [[FAIL_HABIT_TODAY HabitID]]"
     )

@@ -3,11 +3,11 @@
 import { Activity, Clock, Trash2, CalendarDays, CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { createHabit, deleteHabit } from "./actions";
-import { useTransition } from "react";
+import { useTransition, useEffect } from "react";`nimport { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
 export default function HabitClient({ scheduledHabits, executions }: { scheduledHabits: any[], executions: any[] }) {
-  const [isPending, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();`n  const router = useRouter();`n  useEffect(() => { const int = setInterval(() => router.refresh(), 5000); return () => clearInterval(int); }, [router]);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
