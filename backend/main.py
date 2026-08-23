@@ -268,15 +268,15 @@ def habit_scheduler_loop():
                         last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
                     elapsed_mins = (now_utc_dt - last_dt).total_seconds() / 60.0
                     new_step, new_status, msg_to_send = (None, 'pending', None)
-                    if step == 'initial' and elapsed_mins >= 15:
+                    if step == 'initial' and elapsed_mins >= 1:
                         new_step = 'followup1'
-                        prompt = f"You are Guardian. {name} was supposed to do their habit '{title}' 15 minutes ago. Ask them casually (1 sentence) if they ended up doing it. Persona: {persona or 'friendly'}"
+                        prompt = f"You are Guardian. {name} was supposed to do their habit '{title}' 1 minute ago. Ask them casually (1 sentence) if they ended up doing it. Persona: {persona or 'friendly'}"
                         msg_to_send = analysis_llm.invoke([HumanMessage(content=prompt)]).content.strip()
-                    elif step == 'delayed' and elapsed_mins >= 15:
+                    elif step == 'delayed' and elapsed_mins >= 1:
                         new_step = 'followup1'
-                        prompt = f"You are Guardian. {name} said they would do '{title}' 15 mins ago. Ask them casually (1 sentence) if they got it done. Persona: {persona or 'friendly'}"
+                        prompt = f"You are Guardian. {name} said they would do '{title}' 1 min ago. Ask them casually (1 sentence) if they got it done. Persona: {persona or 'friendly'}"
                         msg_to_send = analysis_llm.invoke([HumanMessage(content=prompt)]).content.strip()
-                    elif step == 'followup1' and elapsed_mins >= 5:
+                    elif step == 'followup1' and elapsed_mins >= 1:
                         new_step = 'timeout'
                         new_status = 'failed'
                         print(f'[Habit] {title} for {name} timed out.')
@@ -285,7 +285,7 @@ def habit_scheduler_loop():
                         cursor.execute('UPDATE "HabitExecution" SET "reminderStep" = %s, status = %s, "lastContactedAt" = %s WHERE id = %s', (new_step, new_status, now_utc_str, eid))
                         conn.commit()
                         if msg_to_send:
-                            proactive_send(target_platform_id, msg_to_send)
+                            proactive_send(target_platform_id, msg_to_send, platform=plat)
             conn.close()
         except Exception as e:
             print(f'[Habit Scheduler] Error: {e}')
