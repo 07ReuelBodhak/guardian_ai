@@ -63,7 +63,9 @@ def proactive_send(recipient_id, text, platform='telegram'):
         if platform == 'discord':
             async def send_discord():
                 try:
-                    user = await discord_client.fetch_user(int(recipient_id))
+                    user = discord_client.get_user(int(recipient_id))
+                    if not user:
+                        user = await discord_client.fetch_user(int(recipient_id))
                     await user.send(text)
                 except Exception as de:
                     print(f"[Discord] Failed to send to {recipient_id}: {de}")
