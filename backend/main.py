@@ -194,13 +194,15 @@ def proactive_scheduler_loop():
                     cursor.execute('SELECT title, status FROM "Task" WHERE "userId" = %s AND status != \'completed\' ORDER BY "dueDate" ASC LIMIT 5', (uid,))
                     tasks_rows = cursor.fetchall()
                     task_str = '\n'.join([f'- {t[0]} [Current Status: {t[1]}]' for t in tasks_rows]) if tasks_rows else 'No pending tasks.'
+                    prompt = f"You are Guardian, a human friend talking to {name or 'User'}. Keep it extremely short (1-2 sentences). Mostly lowercase.\nIt is currently 9:00 PM their time.\nAsk them how their day went"
                     if tasks_rows:
-                        prompt = f"You are Guardian, a human friend talking to {name or 'User'}. Keep it extremely short (1-2 sentences). Mostly lowercase.\nIt is currently 9:00 PM their time.\nAsk them how their day went and if they managed to get these tasks done today:\n{task_str}\nDo NOT sound like an AI. Be casual. Persona: {persona or 'friendly'}"
-                        res = analysis_llm.invoke([HumanMessage(content=prompt)])
-                        msg_content = res.content.strip()
-                        proactive_send(target_platform_id, msg_content, platform=plat)
-                        cursor.execute('UPDATE "User" SET "lastNightCheckIn" = %s WHERE id = %s', (today_str, uid))
-                        conn.commit()
+                        prompt += f" and if they managed to get these tasks done today:\n{task_str}\n"
+                    prompt += f"\nDo NOT sound like an AI. Be casual. Persona: {persona or 'friendly'}"
+                    res = analysis_llm.invoke([HumanMessage(content=prompt)])
+                    msg_content = res.content.strip()
+                    proactive_send(target_platform_id, msg_content, platform=plat)
+                    cursor.execute('UPDATE "User" SET "lastNightCheckIn" = %s WHERE id = %s', (today_str, uid))
+                    conn.commit()
             conn.close()
         except Exception as e:
             print(f'[Proactive Scheduler] Error: {e}')
@@ -405,7 +407,15 @@ def handle_message_logic(platform, sender_id, text, reply_callback):
                         if total_tasks > 5:
                             lines.append(f'...and {total_tasks - 5} more pending tasks.')
                         active_tasks_str = '\n'.join(lines)
-                    today_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
+                    try:
+                        from zoneinfo import ZoneInfo
+                    except ImportError:
+                        import pytz as ZoneInfo
+                    try:
+                        tz = ZoneInfo(user_timezone)
+                    except:
+                        tz = ZoneInfo('Asia/Kolkata')
+                    today_str = datetime.datetime.now(tz).strftime('%Y-%m-%d')
                     cursor.execute('SELECT e.id, h.title, e."reminderStep" FROM "HabitExecution" e JOIN "ScheduledHabit" h ON e."scheduledHabitId" = h.id WHERE e."userId" = %s AND e.status = \'pending\' AND e."dateString" = %s', (user_id, today_str))
                     habit_rows = cursor.fetchall()
                     conn_db.close()
