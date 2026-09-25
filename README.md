@@ -34,7 +34,7 @@ We take mental health data security seriously. Guardian AI implements several la
 Guardian AI is built as a full-stack monorepo with separated frontend and backend services:
 
 *   **Frontend**: Next.js App Router, Tailwind CSS, and Auth.js for user dashboards and analytics.
-*   **Backend**: Python, LangGraph for multi-agent orchestration, Discord.py, and Groq (Llama 3.1 8b) for blazing-fast LLM inference.
+*   **Backend**: Python, LangGraph for multi-agent orchestration, Discord.py, and Groq (openai/gpt-oss-120b) for blazing-fast LLM inference.
 *   **Database**: A live production database (e.g., PostgreSQL/MySQL) acts as the shared state between the Next.js frontend and the Python backend.
 
 ---
